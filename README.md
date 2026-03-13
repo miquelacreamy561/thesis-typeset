@@ -22,6 +22,18 @@
 - 引用逗号间距自动修正
 - 配置保存/加载，方便分享给同校同学
 
+## 支持格式
+
+| 输入格式 | 说明 | 额外依赖 |
+|----------|------|----------|
+| `.docx` | Word 文档 | 无 |
+| `.doc` | 旧版 Word | 需本机安装 Microsoft Word |
+| `.txt` | 纯文本 | 需 [pandoc](https://pandoc.org/) |
+| `.md` | Markdown | 需 pandoc |
+| `.tex` | LaTeX | 需 pandoc |
+
+输出统一为 `.docx`。使用 `.txt`/`.md`/`.tex` 时，将 `pandoc.exe` 放在程序同目录或加入 PATH 即可。
+
 ## 下载使用
 
 ### 方式一：下载 exe（推荐）
