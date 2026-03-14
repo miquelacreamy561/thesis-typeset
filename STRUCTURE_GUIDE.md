@@ -67,6 +67,7 @@ Key words: word1; word2; word3           ← [检查] 必须存在，格式「Ke
 | 目录 | 目　　　　录 | 居中 |
 | 参考文献 | 参　考　文　献 | 居中 |
 | 致谢 | 致　　　　谢 | 居中 |
+![alt text](image-1.png)
 
 ### 适配其他学校
 
