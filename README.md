@@ -21,7 +21,11 @@
 - 页码设置（前置罗马数字 + 正文阿拉伯数字）
 - 引用逗号间距自动修正
 - 配置保存/加载，方便分享给同校同学
-
+- 参考文献自动交叉引用，包括[1]和（作者，年份）两种识别类型
+  在 Word 中按 Alt+F9+Fn 可切换域代码显示，你应该能看到 {SEQ
+  Ref} 和 {REF _Ref38 \h} 而非纯文字 [1]
+  删除一条参考文献后：按 Ctrl+A →再按Fn+F9 即可全局更新编号
+  
 ## 支持格式
 
 | 输入格式 | 说明 | 额外依赖 |
@@ -84,6 +88,9 @@ build_exe.bat
 | `preprocess_txt_to_md.py` | txt 预处理转 Markdown |
 | `defaults/scau_2024.yaml` | 默认配置文件 |
 | `defaults/scau_logo.png` | 学校 Logo |
+
+## 文档示例看这里
+https://github.com/153lsr/thesis-typeset/blob/main/STRUCTURE_GUIDE.md
 
 ## License
 
