@@ -1261,6 +1261,533 @@ def normalize_heading_spacing(doc, cfg):
 
 
 # ---------------------------------------------------------------------------
+# Citation / Reference cross-check
+# ---------------------------------------------------------------------------
+
+_CITE_NUM_RE = re.compile(r'\[(\d+(?:\s*[,，\-–]\s*\d+)*)\]')
+_CITE_AY_OUTER = re.compile(r'[（(](.+?)[）)]')
+_CITE_AY_INNER = re.compile(r'(.+?)[,，]\s*((?:19|20)\d{2}[a-z]?)\s*$')
+_REF_NUM_RE = re.compile(r'^\[(\d+)\]\s*')
+_REF_TYPE_RE = re.compile(r'\[([A-Z]{1,2}(?:/[A-Z]{1,2})?)\]')
+_REF_YEAR_RE = re.compile(r'(?:19|20)\d{2}[a-z]?')
+_GBT_VALID_TYPES = {
+    "J", "M", "C", "D", "R", "S", "P", "A", "Z", "N",
+    "EB/OL", "OL", "DB/OL", "CP/DK", "DB", "CP",
+}
+
+
+def _parse_cite_numbers(inner):
+    """Parse inner text of [N,M-K] into a list of integers."""
+    nums = []
+    for part in re.split(r'[,，]', inner):
+        part = part.strip()
+        rm = re.match(r'(\d+)\s*[-–]\s*(\d+)', part)
+        if rm:
+            nums.extend(range(int(rm.group(1)), int(rm.group(2)) + 1))
+        elif re.match(r'\d+$', part):
+            nums.append(int(part))
+    return nums
+
+
+def _extract_primary_author(author_str):
+    """Extract first author from composite author string."""
+    return re.split(
+        r'等|[和与&,，]|\s+and\s+|\s+et\s+al', author_str, maxsplit=1
+    )[0].strip()
+
+
+def check_citations(doc, cfg):
+    """Check citation-reference cross-matching. Returns list of warnings."""
+    warnings = []
+    sec = cfg.get("sections", {})
+    st_map = _get_special_title_map(cfg)
+
+    ref_key = "参考文献"
+    if "参考文献" in st_map:
+        ref_key = st_map["参考文献"]["match"]
+    ref_key_norm = ref_key.replace(" ", "").replace("\u3000", "")
+
+    chap_pat = re.compile(sec.get("chapter_pattern", r"^第\s*\d+\s*章"))
+
+    # --- locate reference section & body range ---
+    paras = doc.paragraphs
+    ref_start = ref_end = body_start = None
+
+    # collect special title norms for boundary detection
+    _boundary_norms = set()
+    for st in sec.get("special_titles", []):
+        n = st["match"].replace(" ", "").replace("\u3000", "")
+        if n != ref_key_norm:
+            _boundary_norms.add(n)
+    _ap = sec.get("appendix_pattern", r"^附录\s*[A-Z]?")
+    if _ap.endswith("[A-Z]"):
+        _ap += "?"
+    appendix_re = re.compile(_ap)
+
+    for i, p in enumerate(paras):
+        sn = p.style.name if p.style else ""
+        t_strip = p.text.strip()
+        t_norm = t_strip.replace(" ", "").replace("\u3000", "")
+        is_h1 = sn in ("Heading 1", "样式1")
+
+        if is_h1 and body_start is None and chap_pat.match(t_strip):
+            body_start = i
+        if is_h1 and t_norm == ref_key_norm:
+            ref_start = i + 1
+        elif ref_start is not None and ref_end is None:
+            # end reference section at any heading OR known boundary title
+            if is_h1 or (sn.startswith("Heading") and (
+                    t_norm in _boundary_norms or appendix_re.match(t_strip))):
+                ref_end = i
+
+    if ref_start is None:
+        return []
+    if ref_end is None:
+        ref_end = len(paras)
+    if body_start is None:
+        body_start = 0
+
+    # --- parse reference entries ---
+    ref_entries = []
+    for i in range(ref_start, ref_end):
+        p = paras[i]
+        sn = p.style.name if p.style else ""
+        t = p.text.strip()
+        t_norm = t.replace(" ", "").replace("\u3000", "")
+
+        # stop at section boundaries (heading / special title / appendix)
+        if sn and sn.startswith("Heading"):
+            break
+        if t_norm in _boundary_norms or appendix_re.match(t):
+            break
+        if not t:
+            continue
+
+        entry = {"text": t, "idx": i}
+
+        m = _REF_NUM_RE.match(t)
+        entry["num"] = int(m.group(1)) if m else None
+        t_body = t[m.end():] if m else t
+
+        tm = _REF_TYPE_RE.search(t)
+        entry["type"] = tm.group(1) if tm else None
+
+        years = _REF_YEAR_RE.findall(t)
+        entry["year"] = years[0] if years else None
+
+        am = re.match(r'(.+?(?:\.[A-Z]\.)*)\.\s*(?=[^A-Z])', t_body)
+        if not am:
+            am = re.match(r'(.+?)．', t_body)
+        entry["authors"] = am.group(1).strip() if am else t_body[:30].strip()
+
+        ref_entries.append(entry)
+
+    if not ref_entries:
+        return []
+
+    # --- scan body citations (skip appendix) ---
+    num_cites = []   # (number, para_index)
+    ay_cites = []    # (author, year, para_index)
+    in_appendix = False
+
+    for i in range(body_start, ref_start - 1):
+        p = paras[i]
+        sn = p.style.name if p.style else ""
+        t_strip = p.text.strip()
+
+        if sn in ("Heading 1", "样式1"):
+            in_appendix = bool(appendix_re.match(t_strip))
+        if sn.startswith("Heading") or in_appendix:
+            continue
+        if not t_strip:
+            continue
+
+        for m in _CITE_NUM_RE.finditer(t_strip):
+            for n in _parse_cite_numbers(m.group(1)):
+                num_cites.append((n, i))
+
+        for m in _CITE_AY_OUTER.finditer(t_strip):
+            inner = m.group(1)
+            for seg in re.split(r'[;；]', inner):
+                seg = seg.strip()
+                am = _CITE_AY_INNER.match(seg)
+                if am:
+                    author = am.group(1).strip()
+                    if re.fullmatch(r'[\d\s\-–—年]+', author):
+                        continue  # skip year ranges like "2015—2022年"
+                    ay_cites.append((author, am.group(2).strip(), i))
+
+    # --- auto-detect dominant style ---
+    style = "numbered" if len(num_cites) >= len(ay_cites) else "author-year"
+
+    # --- cross-match ---
+    if style == "numbered":
+        ref_nums = {e["num"]: e for e in ref_entries if e["num"] is not None}
+
+        # reference list ordering
+        nums_list = [e["num"] for e in ref_entries if e["num"] is not None]
+        if nums_list:
+            expected = list(range(nums_list[0], nums_list[0] + len(nums_list)))
+            if nums_list != expected:
+                gaps = sorted(set(expected) - set(nums_list))
+                if gaps:
+                    warnings.append(f"参考文献编号不连续，缺少: {gaps}")
+            seen = set()
+            for n in nums_list:
+                if n in seen:
+                    warnings.append(f"参考文献编号重复: [{n}]")
+                seen.add(n)
+
+        # body citation first-appearance order
+        first_seen = []
+        for n, _ in num_cites:
+            if n not in first_seen:
+                first_seen.append(n)
+        if first_seen and first_seen != sorted(first_seen):
+            preview = first_seen[:15]
+            warnings.append(
+                f"正文引用编号未按首次出现顺序排列"
+                f"（前{len(preview)}个: {preview}）"
+            )
+
+        # unmatched
+        cited_set = {n for n, _ in num_cites}
+        ref_set = set(ref_nums.keys())
+        diff_cite = sorted(cited_set - ref_set)
+        diff_ref = sorted(ref_set - cited_set)
+        if diff_cite:
+            warnings.append(f"正文引用了但文末无对应条目: {diff_cite}")
+        if diff_ref:
+            warnings.append(f"文末有条目但正文未引用: {diff_ref}")
+
+    else:  # author-year
+        unmatched = []
+        for author_str, year_str, _ in ay_cites:
+            primary = _extract_primary_author(author_str)
+            found = any(
+                e["year"] and e["year"][:4] == year_str[:4]
+                and primary and primary in e["authors"]
+                for e in ref_entries
+            )
+            if not found:
+                tag = f"（{author_str}，{year_str}）"
+                if tag not in unmatched:
+                    unmatched.append(tag)
+        if unmatched:
+            warnings.append(
+                f"正文引用了但文末无匹配条目: {', '.join(unmatched[:15])}"
+            )
+
+        ref_ay = set()
+        for e in ref_entries:
+            if e["year"] and e["authors"]:
+                ref_ay.add((_extract_primary_author(e["authors"]), e["year"][:4]))
+        cited_ay = set()
+        for a, y, _ in ay_cites:
+            cited_ay.add((_extract_primary_author(a), y[:4]))
+        uncited = ref_ay - cited_ay
+        if uncited:
+            tags = [f"{a}({y})" for a, y in sorted(uncited)]
+            warnings.append(f"文末有条目但正文未引用: {', '.join(tags[:15])}")
+
+    # --- GB/T 7714 format check ---
+    for e in ref_entries:
+        if e["type"] is None:
+            warnings.append(f"参考文献缺少类型标识[J]/[M]/..: \"{e['text'][:50]}\"")
+        elif e["type"] not in _GBT_VALID_TYPES:
+            warnings.append(f"参考文献类型标识不规范[{e['type']}]: \"{e['text'][:50]}\"")
+        if not e["year"]:
+            warnings.append(f"参考文献缺少年份: \"{e['text'][:50]}\"")
+
+    return warnings
+
+
+# ---------------------------------------------------------------------------
+# Cross-reference fields for citations
+# ---------------------------------------------------------------------------
+
+def _make_text_run_el(text, rPr_el=None):
+    """Create a <w:r> element with text and optional formatting."""
+    r = OxmlElement('w:r')
+    if rPr_el is not None:
+        r.append(copy.deepcopy(rPr_el))
+    t = OxmlElement('w:t')
+    t.set(qn('xml:space'), 'preserve')
+    t.text = text
+    r.append(t)
+    return r
+
+
+def _make_field_runs(instr, display, rPr_el=None):
+    """Create Word field XML: begin + instrText + separate + display + end."""
+    els = []
+    for ftype in ('begin', None, 'separate', None, 'end'):
+        r = OxmlElement('w:r')
+        if rPr_el is not None:
+            r.append(copy.deepcopy(rPr_el))
+        if ftype in ('begin', 'separate', 'end'):
+            fc = OxmlElement('w:fldChar')
+            fc.set(qn('w:fldCharType'), ftype)
+            r.append(fc)
+        elif len(els) == 1:  # instrText (second element)
+            it = OxmlElement('w:instrText')
+            it.set(qn('xml:space'), 'preserve')
+            it.text = f' {instr} '
+            r.append(it)
+        else:  # display text (fourth element)
+            t = OxmlElement('w:t')
+            t.set(qn('xml:space'), 'preserve')
+            t.text = display
+            r.append(t)
+        els.append(r)
+    return els
+
+
+def _parse_cite_structure(inner):
+    """Parse [N,M-K] inner text preserving structure.
+    Returns list of ('num', N) | ('range', (start, end)) | ('sep', ',').
+    """
+    parts = []
+    for seg in re.split(r'([,，])', inner):
+        seg = seg.strip()
+        if seg in (',', '，'):
+            if parts:
+                parts.append(('sep', ','))
+            continue
+        rm = re.match(r'(\d+)\s*[-–]\s*(\d+)', seg)
+        if rm:
+            parts.append(('range', (int(rm.group(1)), int(rm.group(2)))))
+        elif re.match(r'\d+$', seg):
+            parts.append(('num', int(seg)))
+    return parts
+
+
+def _append_char_segment(p_el, chars):
+    """Append chars to paragraph XML, grouping consecutive same-formatting."""
+    if not chars:
+        return
+    cur_rPr = chars[0][1]
+    cur_text = ""
+    for ch, rPr in chars:
+        if rPr is cur_rPr:
+            cur_text += ch
+        else:
+            if cur_text:
+                p_el.append(_make_text_run_el(cur_text, cur_rPr))
+            cur_rPr = rPr
+            cur_text = ch
+    if cur_text:
+        p_el.append(_make_text_run_el(cur_text, cur_rPr))
+
+
+def _apply_ref_crosslinks(doc, cfg):
+    """Replace static [N] with SEQ/REF Word fields for cross-referencing."""
+    sec = cfg.get("sections", {})
+    st_map = _get_special_title_map(cfg)
+
+    ref_key_norm = "参考文献"
+    if "参考文献" in st_map:
+        ref_key_norm = st_map["参考文献"]["match"].replace(" ", "").replace("\u3000", "")
+
+    chap_pat = re.compile(sec.get("chapter_pattern", r"^第\s*\d+\s*章"))
+    _ap = sec.get("appendix_pattern", r"^附录\s*[A-Z]?")
+    if _ap.endswith("[A-Z]"):
+        _ap += "?"
+    appendix_re = re.compile(_ap)
+
+    _boundary_norms = set()
+    for st in sec.get("special_titles", []):
+        n = st["match"].replace(" ", "").replace("\u3000", "")
+        if n != ref_key_norm:
+            _boundary_norms.add(n)
+
+    paras = doc.paragraphs
+    ref_start = ref_end = body_start = None
+
+    for i, p in enumerate(paras):
+        sn = p.style.name if p.style else ""
+        t_strip = p.text.strip()
+        t_norm = t_strip.replace(" ", "").replace("\u3000", "")
+        is_h1 = sn in ("Heading 1", "样式1")
+        if is_h1 and body_start is None and chap_pat.match(t_strip):
+            body_start = i
+        if is_h1 and t_norm == ref_key_norm:
+            ref_start = i + 1
+        elif ref_start is not None and ref_end is None:
+            if is_h1 or (sn.startswith("Heading") and (
+                    t_norm in _boundary_norms or appendix_re.match(t_strip))):
+                ref_end = i
+
+    if ref_start is None:
+        return
+    if ref_end is None:
+        ref_end = len(paras)
+    if body_start is None:
+        body_start = 0
+
+    # --- detect citation style (only proceed for numbered) ---
+    num_count = ay_count = 0
+    for i in range(body_start, ref_start - 1):
+        t = paras[i].text
+        num_count += len(_CITE_NUM_RE.findall(t))
+        ay_count += len(_CITE_AY_OUTER.findall(t))
+    if num_count < ay_count:
+        return  # author-year style, skip
+
+    # --- Step 1: reference entries → SEQ fields + bookmarks ---
+    bm_id = 1000
+    bookmark_map = {}  # {original_num: bookmark_name}
+
+    for i in range(ref_start, ref_end):
+        p = paras[i]
+        sn = p.style.name if p.style else ""
+        t = p.text.strip()
+        if sn and sn.startswith("Heading"):
+            break
+        t_norm = t.replace(" ", "").replace("\u3000", "")
+        if t_norm in _boundary_norms or appendix_re.match(t):
+            break
+        if not t:
+            continue
+
+        m = _REF_NUM_RE.match(t)
+        if not m:
+            continue
+
+        num = int(m.group(1))
+        bm_name = f"_Ref{num}"
+        bookmark_map[num] = bm_name
+
+        # build char-level formatting map
+        p_el = p._element
+        runs = list(p.runs)
+        if not runs:
+            continue
+        chars = []
+        for r in runs:
+            r_rPr = r._element.find(qn('w:rPr'))
+            for ch in (r.text or ""):
+                chars.append((ch, r_rPr))
+        rPr0 = chars[0][1] if chars else None
+        prefix_end = m.end()
+
+        # clear runs (keep pPr)
+        for child in list(p_el):
+            if child.tag != qn('w:pPr'):
+                p_el.remove(child)
+
+        # rebuild: [<bookmark SEQ>] remaining
+        p_el.append(_make_text_run_el('[', rPr0))
+        bm_start = OxmlElement('w:bookmarkStart')
+        bm_start.set(qn('w:id'), str(bm_id))
+        bm_start.set(qn('w:name'), bm_name)
+        p_el.append(bm_start)
+        for fel in _make_field_runs('SEQ Ref', str(num), rPr0):
+            p_el.append(fel)
+        bm_end = OxmlElement('w:bookmarkEnd')
+        bm_end.set(qn('w:id'), str(bm_id))
+        p_el.append(bm_end)
+        p_el.append(_make_text_run_el('] ', rPr0))
+        _append_char_segment(p_el, chars[prefix_end:])
+
+        bm_id += 1
+
+    if not bookmark_map:
+        return
+
+    # --- Step 2: body citations → REF fields ---
+    in_appendix = False
+    for i in range(body_start, ref_start - 1):
+        p = paras[i]
+        sn = p.style.name if p.style else ""
+        t_strip = p.text.strip()
+        if sn in ("Heading 1", "样式1"):
+            in_appendix = bool(appendix_re.match(t_strip))
+        if sn.startswith("Heading") or in_appendix or not t_strip:
+            continue
+
+        runs = list(p.runs)
+        if not runs:
+            continue
+        chars = []
+        for r in runs:
+            r_rPr = r._element.find(qn('w:rPr'))
+            for ch in (r.text or ""):
+                chars.append((ch, r_rPr))
+        full_text = "".join(c[0] for c in chars)
+
+        matches = list(_CITE_NUM_RE.finditer(full_text))
+        if not matches:
+            continue
+
+        # check at least one citation is resolvable
+        has_valid = False
+        for mat in matches:
+            parts = _parse_cite_structure(mat.group(1))
+            all_nums = []
+            for pt in parts:
+                if pt[0] == 'num':
+                    all_nums.append(pt[1])
+                elif pt[0] == 'range':
+                    all_nums.extend(pt[1])
+            if all(n in bookmark_map for n in all_nums):
+                has_valid = True
+                break
+        if not has_valid:
+            continue
+
+        # clear runs and rebuild
+        p_el = p._element
+        for child in list(p_el):
+            if child.tag != qn('w:pPr'):
+                p_el.remove(child)
+
+        pos = 0
+        for mat in matches:
+            # text before citation
+            if mat.start() > pos:
+                _append_char_segment(p_el, chars[pos:mat.start()])
+
+            parts = _parse_cite_structure(mat.group(1))
+            all_nums = []
+            for pt in parts:
+                if pt[0] == 'num':
+                    all_nums.append(pt[1])
+                elif pt[0] == 'range':
+                    all_nums.extend(pt[1])
+            cite_rPr = chars[mat.start()][1]
+
+            if all(n in bookmark_map for n in all_nums):
+                # replace with REF fields
+                p_el.append(_make_text_run_el('[', cite_rPr))
+                for j, pt in enumerate(parts):
+                    if pt[0] == 'sep':
+                        p_el.append(_make_text_run_el(',', cite_rPr))
+                    elif pt[0] == 'num':
+                        bm = bookmark_map[pt[1]]
+                        for fel in _make_field_runs(f'REF {bm} \\h', str(pt[1]), cite_rPr):
+                            p_el.append(fel)
+                    elif pt[0] == 'range':
+                        bm_s = bookmark_map[pt[1][0]]
+                        bm_e = bookmark_map[pt[1][1]]
+                        for fel in _make_field_runs(f'REF {bm_s} \\h', str(pt[1][0]), cite_rPr):
+                            p_el.append(fel)
+                        p_el.append(_make_text_run_el('-', cite_rPr))
+                        for fel in _make_field_runs(f'REF {bm_e} \\h', str(pt[1][1]), cite_rPr):
+                            p_el.append(fel)
+                p_el.append(_make_text_run_el(']', cite_rPr))
+            else:
+                # keep as plain text
+                _append_char_segment(p_el, chars[mat.start():mat.end()])
+
+            pos = mat.end()
+
+        # remaining text
+        if pos < len(chars):
+            _append_char_segment(p_el, chars[pos:])
+
+
+# ---------------------------------------------------------------------------
 # Main formatting entry point
 # ---------------------------------------------------------------------------
 
@@ -1426,6 +1953,7 @@ def apply_format(input_path, output_path, config=None, config_path=None):
     en_kw_re = sec.get("en_keywords_pattern", r"(?i)^\s*Key\s*words\s*[：:]")
 
     past_abstract = False  # after Abstract: line, English text = body (not title)
+    en_title_seen = False  # after English title, next short non-CJK = author name
 
     for p in non_empty[1:]:
         t = p.text.strip()
@@ -1465,11 +1993,12 @@ def apply_format(input_path, output_path, config=None, config_path=None):
             r2 = p.add_run(content)
             set_run_font(r2, east_asia=latin, size_pt=body_size, bold=False, latin=latin)
         elif not past_abstract and not contains_cjk(t) and not re.match(r"^\s*(Abstract|Key\s*words)\s*:", t, re.I) and len(t) > 20 and not re.match(r"^[\(（]", t):
+            en_title_seen = True
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             p.paragraph_format.first_line_indent = Pt(0)
             p.paragraph_format.line_spacing = body_ls
             set_para_runs_font(p, east_asia=latin, size_pt=h1_size, bold=True, latin=latin)
-        elif not past_abstract and re.match(r"^[A-Za-z]+(\s+[A-Za-z]+){1,3}$", t):
+        elif not past_abstract and en_title_seen and not contains_cjk(t) and not re.match(r"^[\(（]", t) and not re.match(r"^\s*(Abstract|Key\s*words)\s*:", t, re.I):
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             p.paragraph_format.first_line_indent = Pt(0)
             p.paragraph_format.line_spacing = body_ls
@@ -1678,6 +2207,12 @@ def apply_format(input_path, output_path, config=None, config_path=None):
     if cap_cfg.get("check_numbering", True):
         warnings = _check_caption_numbering(doc, fig_pat, tbl_pat, cfg)
 
+    # Citation / reference cross-check
+    try:
+        warnings.extend(check_citations(doc, cfg))
+    except Exception as exc:
+        print(f"引用检查出错（已跳过）: {exc}", file=sys.stderr)
+
     # Fix citation comma spacing: "(Author,YEAR)" → "(Author, YEAR)"
     _cite_comma = re.compile(r",\s*((?:19|20)\d{2})")
     for para in doc.paragraphs:
@@ -1688,9 +2223,33 @@ def apply_format(input_path, output_path, config=None, config_path=None):
                 run.text = new
                 print(f"  引用逗号修正: \"{old.strip()[:40]}\" → \"{new.strip()[:40]}\"")
 
+    # Cross-reference fields for numbered citations
+    try:
+        _apply_ref_crosslinks(doc, cfg)
+    except Exception as exc:
+        print(f"交叉引用创建出错（已跳过）: {exc}", file=sys.stderr)
+
     # Table formatting
     tbl_cfg = cfg["table"]
     for table in doc.tables:
+        # Autofit: table width = 100% of page
+        tbl = table._tbl
+        tblPr = tbl.tblPr
+        if tblPr is None:
+            tblPr = OxmlElement('w:tblPr')
+            tbl.insert(0, tblPr)
+        tblW = tblPr.find(qn('w:tblW'))
+        if tblW is None:
+            tblW = OxmlElement('w:tblW')
+            tblPr.append(tblW)
+        tblW.set(qn('w:type'), 'pct')
+        tblW.set(qn('w:w'), '5000')
+        tblLayout = tblPr.find(qn('w:tblLayout'))
+        if tblLayout is None:
+            tblLayout = OxmlElement('w:tblLayout')
+            tblPr.append(tblLayout)
+        tblLayout.set(qn('w:type'), 'autofit')
+
         rows = len(table.rows)
         for r_idx, row in enumerate(table.rows):
             for cell in row.cells:

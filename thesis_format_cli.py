@@ -190,6 +190,13 @@ class FormatterGUI:
         self._messagebox = messagebox
         self._scrolledtext = scrolledtext
 
+        # Windows high-DPI: declare per-monitor DPI awareness
+        try:
+            import ctypes
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        except Exception:
+            pass
+
         root = self._root = tk.Tk()
         root.title("论文格式化工具")
         root.resizable(True, True)
@@ -593,7 +600,7 @@ class FormatterGUI:
 
         # log
         self._log = self._scrolledtext.ScrolledText(
-            bot, width=70, height=8, state="disabled", font=("Consolas", 9))
+            bot, width=70, height=8, state="disabled", font=("Microsoft YaHei UI", 9))
         self._log.pack(fill="x", pady=(4, 0))
 
     # ---- panel switching ----
