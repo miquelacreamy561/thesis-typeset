@@ -93,7 +93,7 @@ build_exe.bat
 https://github.com/153lsr/thesis-typeset/blob/main/STRUCTURE_GUIDE.md
 
 ## 界面概览
-
+![alt text](image.png)
 
 ## License
 
