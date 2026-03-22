@@ -91,16 +91,57 @@ def set_section_page_number_format(section, fmt="decimal", start=None):
         pg_num.set(qn("w:start"), str(start))
 
 
+def _is_page_break_only_paragraph(p_element):
+    if p_element is None or p_element.tag != qn("w:p"):
+        return False
+    if "".join(p_element.itertext()).strip():
+        return False
+    for br in p_element.iter(qn("w:br")):
+        if br.get(qn("w:type")) == "page":
+            return True
+    return False
+
+
 def insert_section_break_before(paragraph):
     p_element = paragraph._element
     prev = p_element.getprevious()
     if prev is None:
         return None
-    pPr = prev.find(qn("w:pPr"))
+
+    break_holder = prev
+    if _is_page_break_only_paragraph(prev):
+        prev_prev = prev.getprevious()
+        if prev_prev is not None and prev_prev.tag == qn("w:p"):
+            break_holder = prev_prev
+            parent = prev.getparent()
+            if parent is not None:
+                parent.remove(prev)
+        else:
+            break_holder = prev
+            pPr = break_holder.find(qn("w:pPr"))
+            if pPr is None:
+                pPr = OxmlElement("w:pPr")
+                break_holder.insert(0, pPr)
+            for child in list(break_holder):
+                if child is not pPr:
+                    break_holder.remove(child)
+
+    if break_holder.tag != qn("w:p"):
+        break_holder = OxmlElement("w:p")
+        p_element.addprevious(break_holder)
+
+    pPr = break_holder.find(qn("w:pPr"))
     if pPr is None:
         pPr = OxmlElement("w:pPr")
-        prev.insert(0, pPr)
+        break_holder.insert(0, pPr)
+
+    for existing in list(pPr.findall(qn("w:sectPr"))):
+        pPr.remove(existing)
+
     sect_pr = OxmlElement("w:sectPr")
+    sect_type = OxmlElement("w:type")
+    sect_type.set(qn("w:val"), "nextPage")
+    sect_pr.append(sect_type)
     pPr.append(sect_pr)
     return sect_pr
 

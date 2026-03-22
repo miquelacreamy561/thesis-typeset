@@ -677,6 +677,14 @@ class FormatterGUI:
                 return f"{num}行"
             return f"{num}{u}"
 
+        def set_var_value(num, u):
+            if isinstance(var, self._tk.IntVar):
+                var.set(int(round(num)))
+            elif isinstance(var, self._tk.DoubleVar):
+                var.set(float(num))
+            else:
+                var.set(format_value(num, u))
+
         # 初始化
         init_num, init_unit = parse_value(var.get())
         current_num = [init_num]
@@ -700,7 +708,7 @@ class FormatterGUI:
             current_unit[0] = u
             entry.delete(0, "end")
             entry.insert(0, format_value(num, u))
-            var.set(format_value(num, u))
+            set_var_value(num, u)
 
         entry.bind("<Return>", on_input_complete)
         entry.bind("<FocusOut>", on_input_complete)
@@ -716,7 +724,7 @@ class FormatterGUI:
                 current_num[0] = new_num
                 entry.delete(0, "end")
                 entry.insert(0, format_value(new_num, current_unit[0]))
-                var.set(format_value(new_num, current_unit[0]))
+                set_var_value(new_num, current_unit[0])
             # 延迟重置标志，确保 FocusOut 已经完成
             entry.after(100, lambda: button_clicking.__setitem__(0, False))
 

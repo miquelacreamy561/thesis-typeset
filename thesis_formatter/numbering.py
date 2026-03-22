@@ -376,10 +376,10 @@ def _create_abstract_num(abstract_num_id, cfg):
 
     # 多级列表模板
     levels = [
-        {"lvl": 0, "fmt": "decimal", "txt": "%1", "style": "Heading1"},
-        {"lvl": 1, "fmt": "decimal", "txt": "%1.%2", "style": "Heading2"},
-        {"lvl": 2, "fmt": "decimal", "txt": "%1.%2.%3", "style": "Heading3"},
-        {"lvl": 3, "fmt": "decimal", "txt": "%1.%2.%3.%4", "style": "Heading4"},
+        {"lvl": 0, "fmt": "decimal", "txt": "%1 ", "style": "Heading1"},
+        {"lvl": 1, "fmt": "decimal", "txt": "%1.%2 ", "style": "Heading2"},
+        {"lvl": 2, "fmt": "decimal", "txt": "%1.%2.%3 ", "style": "Heading3"},
+        {"lvl": 3, "fmt": "decimal", "txt": "%1.%2.%3.%4 ", "style": "Heading4"},
     ]
 
     for level_info in levels:
@@ -401,9 +401,9 @@ def _create_abstract_num(abstract_num_id, cfg):
         lvl_text.set(qn("w:val"), level_info["txt"])
         lvl.append(lvl_text)
 
-        # 编号后缀：无制表符
+        # 编号后缀：使用一个普通空格；配合 lvlText 中的一个空格，总计两个普通空格
         suff = OxmlElement("w:suff")
-        suff.set(qn("w:val"), "nothing")
+        suff.set(qn("w:val"), "space")
         lvl.append(suff)
 
         # 关联到段落样式

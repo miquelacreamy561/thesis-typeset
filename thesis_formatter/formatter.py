@@ -201,13 +201,7 @@ def apply_format(input_path, output_path, config=None, config_path=None):
     normalize_sections(doc, cfg)
 
     renum_changes = []
-    should_setup_multilevel_list = False
     if sec.get("renumber_headings", False):
-        if requested_caption_mode == numbering.CAPTION_MODE_DYNAMIC:
-            should_setup_multilevel_list = True
-        elif not auto_changes:
-            should_setup_multilevel_list = True
-    if should_setup_multilevel_list:
         renum_changes = numbering.setup_multilevel_list(doc, cfg)
 
     requested_caption_mode, effective_caption_mode, caption_mode_warnings = numbering.resolve_caption_mode_after_normalization(
