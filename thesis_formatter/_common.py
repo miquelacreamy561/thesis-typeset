@@ -2,7 +2,7 @@ import os
 import re
 import sys
 
-from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Mm, Inches, Pt, RGBColor
@@ -101,6 +101,251 @@ def parse_length(value):
     else:
         # 未知单位，默认为 pt
         return Pt(num)
+
+
+def _format_number(value):
+    num = float(value)
+    if abs(num - round(num)) < 0.0001:
+        return str(int(round(num)))
+    text = f"{num:.2f}".rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def normalize_length_text(value, default_unit="pt"):
+    if hasattr(value, "pt"):
+        return f"{_format_number(value.pt)}pt"
+    if isinstance(value, (int, float)):
+        return f"{_format_number(value)}{default_unit}"
+
+    s = str(value).strip()
+    if not s:
+        return f"0{default_unit}"
+
+    s = s.replace("磅", "pt")
+    if s.endswith("号") and s[:-1] in _CN_FONT_SIZE_MAP:
+        s = s[:-1]
+    if re.fullmatch(r"[\d.]+", s):
+        return f"{_format_number(float(s))}{default_unit}"
+    return s
+
+
+def normalize_paragraph_spacing(value, default=0):
+    if value in (None, ""):
+        value = default
+
+    if hasattr(value, "pt"):
+        return {"mode": "length", "value": normalize_length_text(value)}
+
+    if isinstance(value, (int, float)):
+        return {"mode": "lines", "value": float(value)}
+
+    s = str(value).strip()
+    if not s:
+        return normalize_paragraph_spacing(default)
+
+    s = s.replace("磅", "pt")
+    if s.endswith("行"):
+        try:
+            return {"mode": "lines", "value": float(s[:-1].strip())}
+        except ValueError:
+            pass
+
+    if re.fullmatch(r"[\d.]+", s):
+        return {"mode": "lines", "value": float(s)}
+
+    return {"mode": "length", "value": normalize_length_text(s)}
+
+
+def format_paragraph_spacing_value(value):
+    spec = normalize_paragraph_spacing(value)
+    if spec["mode"] == "lines":
+        return f"{_format_number(spec['value'])}行"
+    return normalize_length_text(spec["value"])
+
+
+def paragraph_spacing_to_ooxml(value):
+    spec = normalize_paragraph_spacing(value)
+    if spec["mode"] == "lines":
+        return {"mode": "lines", "value": str(int(round(float(spec["value"]) * 100)))}
+    pt_val = parse_length(spec["value"]).pt
+    return {"mode": "length", "value": str(int(pt_val * 20))}
+
+
+def paragraph_spacing_to_word(value):
+    spec = normalize_paragraph_spacing(value)
+    if spec["mode"] == "lines":
+        return {"mode": "lines", "value": float(spec["value"])}
+    return {"mode": "length", "value": float(parse_length(spec["value"]).pt)}
+
+
+def apply_paragraph_spacing(paragraph_format, side, value):
+    spec = normalize_paragraph_spacing(value)
+    ppr = paragraph_format._element
+    spacing = ppr.find(qn("w:spacing"))
+    if spacing is None:
+        spacing = OxmlElement("w:spacing")
+        ppr.append(spacing)
+
+    attr = qn(f"w:{side}")
+    lines_attr = qn(f"w:{side}Lines")
+    auto_attr = qn(f"w:{side}Autospacing")
+    for key in (attr, lines_attr, auto_attr):
+        if key in spacing.attrib:
+            del spacing.attrib[key]
+
+    if spec["mode"] == "lines":
+        spacing.set(lines_attr, str(int(round(float(spec["value"]) * 100))))
+    else:
+        pt_val = parse_length(spec["value"]).pt
+        spacing.set(attr, str(int(pt_val * 20)))
+    return spec
+
+
+def _parse_multiple_line_spacing(value, default=1.5):
+    if value is None:
+        return float(default)
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    s = str(value).strip().lower()
+    if not s:
+        return float(default)
+
+    presets = {
+        "single": 1.0,
+        "single line": 1.0,
+        "单倍": 1.0,
+        "单倍行距": 1.0,
+        "1.5": 1.5,
+        "1.5倍": 1.5,
+        "1.5 lines": 1.5,
+        "1.5 line": 1.5,
+        "一倍半": 1.5,
+        "double": 2.0,
+        "双倍": 2.0,
+        "双倍行距": 2.0,
+    }
+    if s in presets:
+        return presets[s]
+
+    s = re.sub(r"^(?:多倍|multiple)\s*[:：]?\s*", "", s)
+    s = re.sub(r"(?:倍|行|lines?|line)\s*$", "", s)
+    return float(s)
+
+
+def normalize_line_spacing(value, default=None):
+    if value in (None, ""):
+        value = default if default is not None else 1.5
+
+    if isinstance(value, dict):
+        mode = normalize_line_spacing_mode(
+            value.get("mode") or value.get("type") or value.get("kind") or "multiple"
+        )
+        raw_value = value.get("value", value.get("amount"))
+        if raw_value in (None, ""):
+            raw_value = 1.5 if mode == "multiple" else "20pt"
+        if isinstance(raw_value, str):
+            nested = normalize_line_spacing(raw_value)
+            if nested["mode"] == mode:
+                return nested if mode == "multiple" else {"mode": mode, "value": normalize_length_text(nested["value"])}
+        if mode == "multiple":
+            return {"mode": mode, "value": _parse_multiple_line_spacing(raw_value)}
+        return {"mode": mode, "value": normalize_length_text(raw_value)}
+
+    if isinstance(value, (int, float)):
+        return {"mode": "multiple", "value": float(value)}
+
+    s = str(value).strip()
+    if not s:
+        return normalize_line_spacing(default if default is not None else 1.5)
+
+    exact_match = re.match(r"^(?:固定值|固定|exact(?:ly)?|fixed(?:\s+value)?)\s*[:：]?\s*(.+)$", s, flags=re.I)
+    if exact_match:
+        return {"mode": "exact", "value": normalize_length_text(exact_match.group(1).strip())}
+
+    atleast_match = re.match(r"^(?:最小值|最小|at\s*least|at_least|minimum|min)\s*[:：]?\s*(.+)$", s, flags=re.I)
+    if atleast_match:
+        return {"mode": "at_least", "value": normalize_length_text(atleast_match.group(1).strip())}
+
+    multiple_match = re.match(r"^(?:多倍|multiple)\s*[:：]?\s*(.+)$", s, flags=re.I)
+    if multiple_match:
+        return {"mode": "multiple", "value": _parse_multiple_line_spacing(multiple_match.group(1).strip())}
+
+    try:
+        return {"mode": "multiple", "value": _parse_multiple_line_spacing(s)}
+    except (TypeError, ValueError):
+        return {"mode": "exact", "value": normalize_length_text(s)}
+
+
+def normalize_line_spacing_mode(mode):
+    token = str(mode or "multiple").strip().lower().replace("-", "_")
+    token = re.sub(r"\s+", " ", token)
+    aliases = {
+        "multiple": "multiple",
+        "mult": "multiple",
+        "多倍": "multiple",
+        "倍数": "multiple",
+        "single": "multiple",
+        "double": "multiple",
+        "exact": "exact",
+        "exactly": "exact",
+        "fixed": "exact",
+        "fixed value": "exact",
+        "固定": "exact",
+        "固定值": "exact",
+        "at_least": "at_least",
+        "at least": "at_least",
+        "atleast": "at_least",
+        "minimum": "at_least",
+        "min": "at_least",
+        "最小": "at_least",
+        "最小值": "at_least",
+    }
+    if token in aliases:
+        return aliases[token]
+    compact = token.replace(" ", "_")
+    return aliases.get(compact, "multiple")
+
+
+def format_line_spacing_value(value):
+    spec = normalize_line_spacing(value)
+    if spec["mode"] == "multiple":
+        return f"{_format_number(spec['value'])}倍"
+    return normalize_length_text(spec["value"])
+
+
+def apply_line_spacing(paragraph_format, value):
+    spec = normalize_line_spacing(value)
+    if spec["mode"] == "multiple":
+        paragraph_format.line_spacing = spec["value"]
+        return spec
+
+    length = parse_length(spec["value"])
+    if spec["mode"] == "at_least":
+        paragraph_format.line_spacing_rule = WD_LINE_SPACING.AT_LEAST
+        paragraph_format.line_spacing = length
+    else:
+        paragraph_format.line_spacing = length
+    return spec
+
+
+def line_spacing_to_ooxml(value):
+    spec = normalize_line_spacing(value)
+    if spec["mode"] == "multiple":
+        return str(int(float(spec["value"]) * 240)), "auto"
+
+    pt_val = parse_length(spec["value"]).pt
+    return str(int(pt_val * 20)), "atLeast" if spec["mode"] == "at_least" else "exact"
+
+
+def line_spacing_to_points_and_rule(value, base_line_pt=12):
+    spec = normalize_line_spacing(value)
+    if spec["mode"] == "multiple":
+        return float(spec["value"]) * float(base_line_pt), int(WD_LINE_SPACING.MULTIPLE)
+
+    pt_val = float(parse_length(spec["value"]).pt)
+    rule = WD_LINE_SPACING.AT_LEAST if spec["mode"] == "at_least" else WD_LINE_SPACING.EXACTLY
+    return pt_val, int(rule)
 
 
 def _resource_dir():
@@ -254,8 +499,8 @@ def set_para_runs_font(para, east_asia, size_pt, bold=None, latin="Times New Rom
 
 def zero_spacing(para):
     pf = para.paragraph_format
-    pf.space_before = parse_length(0)
-    pf.space_after = parse_length(0)
+    apply_paragraph_spacing(pf, "before", 0)
+    apply_paragraph_spacing(pf, "after", 0)
 
 
 def set_table_border(cell, edge, sz, val="single", color="000000"):

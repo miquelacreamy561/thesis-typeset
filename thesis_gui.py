@@ -7,6 +7,13 @@ import threading
 
 from thesis_config import DEFAULT_CONFIG
 from thesis_runner import run_format
+from thesis_formatter._common import (
+    format_line_spacing_value,
+    format_paragraph_spacing_value,
+    normalize_length_text,
+    normalize_line_spacing,
+    normalize_line_spacing_mode,
+)
 
 # =============================================================================
 # MODERN THEME COLOR SYSTEM (Fresh Modern + Swiss Minimal)
@@ -84,6 +91,16 @@ class FormatterGUI:
     _CAPTION_MODE = {"严格动态模式 (推荐)": "dynamic", "稳定模式": "stable"}
     _CAPTION_MODE_R = {v: k for k, v in _CAPTION_MODE.items()}
     CAPTION_MODE_LABELS = list(_CAPTION_MODE.keys())
+    _LINE_SPACING_MODE = {
+        "单倍行距": {"mode": "multiple", "preset": 1.0},
+        "1.5倍行距": {"mode": "multiple", "preset": 1.5},
+        "2倍行距": {"mode": "multiple", "preset": 2.0},
+        "最小值": {"mode": "at_least"},
+        "固定值": {"mode": "exact"},
+        "多倍行距": {"mode": "multiple"},
+    }
+    _LINE_SPACING_MODE_R = {"exact": "固定值", "at_least": "最小值", "multiple": "多倍行距"}
+    LINE_SPACING_MODE_LABELS = list(_LINE_SPACING_MODE.keys())
     HEADING_PRESETS = {
         "第X章 / X.X / X.X.X (SCAU)": {
             "h1": r"^第\s*\d+\s*章\b", "h2": r"^\d+\.\d+\s",
@@ -512,18 +529,20 @@ class FormatterGUI:
         self._v_h4b = tk.StringVar(value=self._BOLD_R.get(c["headings"]["h4"]["bold"], "不加粗"))
         self._v_h4a = tk.StringVar(value=self._ALIGN_R.get(c["headings"]["h4"].get("align", "left"), "左对齐"))
         # heading spacing (支持多单位: pt/cm/mm/in/行)
-        self._v_h1sb = tk.StringVar(value=str(c["headings"]["h1"].get("space_before", 0)) + "行")
-        self._v_h1sa = tk.StringVar(value=str(c["headings"]["h1"].get("space_after", 0)) + "行")
-        self._v_h2sb = tk.StringVar(value=str(c["headings"]["h2"].get("space_before", 0)) + "行")
-        self._v_h2sa = tk.StringVar(value=str(c["headings"]["h2"].get("space_after", 0)) + "行")
-        self._v_h3sb = tk.StringVar(value=str(c["headings"]["h3"].get("space_before", 0)) + "行")
-        self._v_h3sa = tk.StringVar(value=str(c["headings"]["h3"].get("space_after", 0)) + "行")
-        self._v_h4sb = tk.StringVar(value=str(c["headings"]["h4"].get("space_before", 0)) + "行")
-        self._v_h4sa = tk.StringVar(value=str(c["headings"]["h4"].get("space_after", 0)) + "行")
-        self._v_lsp = tk.DoubleVar(value=c["body"]["line_spacing"])
+        self._v_h1sb = tk.StringVar(value=format_paragraph_spacing_value(c["headings"]["h1"].get("space_before", 0)))
+        self._v_h1sa = tk.StringVar(value=format_paragraph_spacing_value(c["headings"]["h1"].get("space_after", 0)))
+        self._v_h2sb = tk.StringVar(value=format_paragraph_spacing_value(c["headings"]["h2"].get("space_before", 0)))
+        self._v_h2sa = tk.StringVar(value=format_paragraph_spacing_value(c["headings"]["h2"].get("space_after", 0)))
+        self._v_h3sb = tk.StringVar(value=format_paragraph_spacing_value(c["headings"]["h3"].get("space_before", 0)))
+        self._v_h3sa = tk.StringVar(value=format_paragraph_spacing_value(c["headings"]["h3"].get("space_after", 0)))
+        self._v_h4sb = tk.StringVar(value=format_paragraph_spacing_value(c["headings"]["h4"].get("space_before", 0)))
+        self._v_h4sa = tk.StringVar(value=format_paragraph_spacing_value(c["headings"]["h4"].get("space_after", 0)))
+        body_ls_mode, body_ls_value = self._split_line_spacing_for_gui(c["body"]["line_spacing"])
+        self._v_lsp_mode = tk.StringVar(value=body_ls_mode)
+        self._v_lsp = tk.StringVar(value=body_ls_value)
         self._v_ind = tk.DoubleVar(value=c["body"]["first_line_indent"])
-        self._v_body_sb = tk.StringVar(value=str(c["body"].get("space_before", 0)) + "行")
-        self._v_body_sa = tk.StringVar(value=str(c["body"].get("space_after", 0)) + "行")
+        self._v_body_sb = tk.StringVar(value=format_paragraph_spacing_value(c["body"].get("space_before", 0)))
+        self._v_body_sa = tk.StringVar(value=format_paragraph_spacing_value(c["body"].get("space_after", 0)))
         # heading numbering patterns
         sec = c["sections"]
         self._v_hpreset = tk.StringVar(value=self.PRESET_NAMES[0])
@@ -546,7 +565,9 @@ class FormatterGUI:
         self._v_cap_heading_level = tk.StringVar(value=str(cap.get("chapter_heading_level", 1)))
         self._v_cap_chapter_sep = tk.StringVar(value=cap.get("chapter_separator", "."))
         self._v_cap_caption_sep = tk.StringVar(value=cap.get("caption_separator", ""))
-        self._v_cap_ls = tk.DoubleVar(value=cap.get("line_spacing", c["body"]["line_spacing"]))
+        cap_ls_mode, cap_ls_value = self._split_line_spacing_for_gui(cap.get("line_spacing", c["body"]["line_spacing"]))
+        self._v_cap_ls_mode = tk.StringVar(value=cap_ls_mode)
+        self._v_cap_ls = tk.StringVar(value=cap_ls_value)
         self._v_cap_font = tk.StringVar(value=cap.get("font", "宋体"))
         self._v_cap_numfont = tk.StringVar(value=cap.get("number_font", "Times New Roman"))
         # cover
@@ -561,11 +582,13 @@ class FormatterGUI:
         self._v_tocd = tk.IntVar(value=c["toc"]["depth"])
         self._v_tocfont = tk.StringVar(value=c["toc"].get("font", c["fonts"]["body"]))
         self._v_tocsz = tk.StringVar(value=str(c["toc"].get("font_size", c["sizes"]["body"])) + "pt")
-        self._v_tocls = tk.DoubleVar(value=c["toc"].get("line_spacing", c["body"]["line_spacing"]))
+        toc_ls_mode, toc_ls_value = self._split_line_spacing_for_gui(c["toc"].get("line_spacing", c["body"]["line_spacing"]))
+        self._v_tocls_mode = tk.StringVar(value=toc_ls_mode)
+        self._v_tocls = tk.StringVar(value=toc_ls_value)
         self._v_toc_h1font = tk.StringVar(value=c["toc"].get("h1_font", c["fonts"]["h1"]))
         self._v_toc_h1sz = tk.StringVar(value=str(c["toc"].get("h1_font_size", c["sizes"]["h1"])) + "pt")
-        self._v_toc_sb = tk.StringVar(value=str(c["toc"].get("space_before", 0)) + "行")
-        self._v_toc_sa = tk.StringVar(value=str(c["toc"].get("space_after", 0)) + "行")
+        self._v_toc_sb = tk.StringVar(value=format_paragraph_spacing_value(c["toc"].get("space_before", 0)))
+        self._v_toc_sa = tk.StringVar(value=format_paragraph_spacing_value(c["toc"].get("space_after", 0)))
         self._v_refind = tk.DoubleVar(value=c["references"]["left_indent"])
         self._v_tbl_top = tk.DoubleVar(value=c["table"]["top_border_sz"] / 8)
         self._v_tbl_hdr = tk.DoubleVar(value=c["table"]["header_border_sz"] / 8)
@@ -602,8 +625,12 @@ class FormatterGUI:
         self._v_pn_bstart = tk.IntVar(value=pn.get("body_start", 1))
         # advanced extras
         self._v_body_align = tk.StringVar(value=self._ALIGN_R.get(c["body"]["align"], "两端对齐"))
-        self._v_tbl_ls = tk.DoubleVar(value=c["table"]["line_spacing"])
-        self._v_fn_ls = tk.DoubleVar(value=c["footnote"]["line_spacing"])
+        tbl_ls_mode, tbl_ls_value = self._split_line_spacing_for_gui(c["table"]["line_spacing"])
+        self._v_tbl_ls_mode = tk.StringVar(value=tbl_ls_mode)
+        self._v_tbl_ls = tk.StringVar(value=tbl_ls_value)
+        fn_ls_mode, fn_ls_value = self._split_line_spacing_for_gui(c["footnote"]["line_spacing"])
+        self._v_fn_ls_mode = tk.StringVar(value=fn_ls_mode)
+        self._v_fn_ls = tk.StringVar(value=fn_ls_value)
         # front_matter
         fm = c.get("front_matter", {})
         self._v_fm_mode = tk.StringVar(
@@ -865,6 +892,58 @@ class FormatterGUI:
 
         return r + 1
 
+    def _row_line_spacing(self, p, r, lbl, mode_var, value_var, hint=None):
+        self._ttk.Label(p, text=lbl, font=("Microsoft YaHei UI", 9),
+                       foreground=THEME["text_primary"]).grid(row=r, column=0, sticky="w", pady=6)
+
+        cf = self._ttk.Frame(p)
+        cf.grid(row=r, column=1, sticky="w", padx=8, pady=6)
+
+        combo = self._ttk.Combobox(
+            cf,
+            textvariable=mode_var,
+            values=self.LINE_SPACING_MODE_LABELS,
+            font=("Microsoft YaHei UI", 9),
+            width=10,
+            state="readonly",
+        )
+        combo.pack(side="left")
+
+        entry = self._ttk.Entry(cf, textvariable=value_var, width=14, font=("Microsoft YaHei UI", 9))
+        entry.pack(side="left", padx=(6, 0), ipady=4)
+
+        def normalize_current(_event=None):
+            choice = self._resolve_line_spacing_choice(mode_var.get())
+            preset = choice.get("preset")
+            if preset is not None:
+                value_var.set(format_line_spacing_value({"mode": "multiple", "value": preset}))
+                entry.configure(state="disabled")
+                return
+
+            entry.configure(state="normal")
+            value_var.set(
+                self._normalize_line_spacing_value(
+                    choice.get("mode", "multiple"),
+                    value_var.get(),
+                )
+            )
+
+        combo.bind("<<ComboboxSelected>>", normalize_current)
+        entry.bind("<Return>", normalize_current)
+        entry.bind("<FocusOut>", normalize_current)
+        normalize_current()
+
+        if hint:
+            self._ttk.Label(
+                p,
+                text=hint,
+                foreground=THEME["text_secondary"],
+                font=("Microsoft YaHei UI", 8),
+                justify="left",
+            ).grid(row=r, column=2, sticky="w", pady=6)
+
+        return r + 1
+
     def _row_entry(self, p, r, lbl, var, w=28, hint=None):
         self._ttk.Label(p, text=lbl, font=("Microsoft YaHei UI", 9),
                        foreground=THEME["text_primary"]).grid(row=r, column=0, sticky="w", pady=6)
@@ -963,12 +1042,12 @@ class FormatterGUI:
         r = self._row_unit_entry(p, r, "正文字号:", self._v_sbody, default_unit="pt", lo=5, hi=36)
         r = self._row_combo(p, r, "正文对齐:", self._v_body_align, self.ALIGN_LABELS_KEEP)
         r = self._row_spin(p, r, "首行缩进:", self._v_ind, lo=0, hi=100, step=1, unit="pt")
-        r = self._row_spin(p, r, "行距:", self._v_lsp, lo=1.0, hi=3.0, step=0.25, unit="倍")
+        r = self._row_line_spacing(p, r, "行距:", self._v_lsp_mode, self._v_lsp, hint="可直接选单倍/1.5倍/2倍；多倍如 1.2；固定值/最小值如 20pt")
         r = self._row_spin(p, r, "段前:", self._v_body_sb, lo=0, hi=5, step=0.5, unit="行")
         r = self._row_spin(p, r, "段后:", self._v_body_sa, lo=0, hi=5, step=0.5, unit="行")
         r = self._sep(p, r)
         r = self._row_unit_entry(p, r, "脚注字号:", self._v_sfn, default_unit="pt", lo=5, hi=36)
-        r = self._row_spin(p, r, "脚注行距:", self._v_fn_ls, lo=0.5, hi=3.0, step=0.25, unit="倍")
+        r = self._row_line_spacing(p, r, "脚注行距:", self._v_fn_ls_mode, self._v_fn_ls, hint="可直接选单倍/1.5倍/2倍；多倍如 1.25；固定值/最小值如 18pt")
 
     def _build_heading(self, p):
         r = 0
@@ -1028,7 +1107,7 @@ class FormatterGUI:
     def _build_caption(self, p):
         r = 0
         r = self._row_unit_entry(p, r, "图表题字号:", self._v_scap, default_unit="pt", lo=5, hi=36)
-        r = self._row_spin(p, r, "题注行距:", self._v_cap_ls, lo=0.5, hi=3.0, step=0.25, unit="倍")
+        r = self._row_line_spacing(p, r, "题注行距:", self._v_cap_ls_mode, self._v_cap_ls, hint="可直接选单倍/1.5倍/2倍；多倍如 1.2；固定值/最小值如 16pt")
         r = self._row_entry(p, r, "题注字体:", self._v_cap_font, hint="(如: 宋体)")
         r = self._row_entry(p, r, "编号字体:", self._v_cap_numfont, hint="(如: Times New Roman)")
         r = self._row_combo(p, r, "题注模式:", self._v_cap_mode, self.CAPTION_MODE_LABELS, w=18)
@@ -1066,7 +1145,7 @@ class FormatterGUI:
         r = self._row_spin(p, r, "顶线粗细:", self._v_tbl_top, lo=0.25, hi=6, step=0.25, unit="磅")
         r = self._row_spin(p, r, "栏目线粗细:", self._v_tbl_hdr, lo=0.25, hi=6, step=0.25, unit="磅")
         r = self._row_spin(p, r, "底线粗细:", self._v_tbl_bot, lo=0.25, hi=6, step=0.25, unit="磅")
-        r = self._row_spin(p, r, "表格行距:", self._v_tbl_ls, lo=0.5, hi=3.0, step=0.25, unit="倍")
+        r = self._row_line_spacing(p, r, "表格行距:", self._v_tbl_ls_mode, self._v_tbl_ls, hint="可直接选单倍/1.5倍/2倍；多倍如 1.2；固定值/最小值如 14pt")
 
     def _build_cover_decl(self, p):
         # -- 封面 --
@@ -1134,7 +1213,7 @@ class FormatterGUI:
         r = self._row_unit_entry(p, r, "二级条目字号:", self._v_tocsz, default_unit="pt", lo=5, hi=36)
         r = self._row_entry(p, r, "一级条目字体:", self._v_toc_h1font)
         r = self._row_unit_entry(p, r, "一级条目字号:", self._v_toc_h1sz, default_unit="pt", lo=5, hi=72)
-        r = self._row_spin(p, r, "目录行距:", self._v_tocls, lo=1.0, hi=3.0, step=0.25, unit="倍")
+        r = self._row_line_spacing(p, r, "目录行距:", self._v_tocls_mode, self._v_tocls, hint="可直接选单倍/1.5倍/2倍；多倍如 1.2；固定值/最小值如 20pt")
         r = self._row_spin(p, r, "条目段前:", self._v_toc_sb, lo=0, hi=5, step=0.5, unit="行")
         r = self._row_spin(p, r, "条目段后:", self._v_toc_sa, lo=0, hi=5, step=0.5, unit="行")
         r = self._sep(p, r)
@@ -1375,6 +1454,68 @@ class FormatterGUI:
         except ValueError:
             return default
 
+    @classmethod
+    def _resolve_line_spacing_choice(cls, choice):
+        token = str(choice or "").strip()
+        legacy = {"多倍": "多倍行距", "固定值": "固定值", "最小值": "最小值"}
+        token = legacy.get(token, token)
+        if token in cls._LINE_SPACING_MODE:
+            return dict(cls._LINE_SPACING_MODE[token])
+        return {"mode": normalize_line_spacing_mode(token)}
+
+    @staticmethod
+    def _normalize_line_spacing_value(mode, value_str):
+        normalized_mode = normalize_line_spacing_mode(mode)
+        raw = str(value_str or "").strip()
+        if not raw:
+            raw = "1.5" if normalized_mode == "multiple" else "20pt"
+        if normalized_mode == "multiple":
+            try:
+                parsed = normalize_line_spacing(raw)
+            except (TypeError, ValueError):
+                parsed = None
+            if parsed and parsed["mode"] == "multiple":
+                return format_line_spacing_value(parsed)
+            return format_line_spacing_value({"mode": "multiple", "value": 1.5})
+
+        parsed = normalize_line_spacing(raw)
+        if parsed["mode"] != "multiple":
+            return normalize_length_text(parsed["value"])
+        if raw.replace(".", "", 1).isdigit():
+            return normalize_length_text(parsed["value"])
+        return "20pt"
+
+    @classmethod
+    def _split_line_spacing_for_gui(cls, value):
+        spec = normalize_line_spacing(value)
+        if spec["mode"] == "multiple":
+            multiple = float(spec["value"])
+            if abs(multiple - 1.0) < 1e-9:
+                mode_label = "单倍行距"
+            elif abs(multiple - 1.5) < 1e-9:
+                mode_label = "1.5倍行距"
+            elif abs(multiple - 2.0) < 1e-9:
+                mode_label = "2倍行距"
+            else:
+                mode_label = "多倍行距"
+        else:
+            mode_label = cls._LINE_SPACING_MODE_R.get(spec["mode"], "多倍行距")
+        return mode_label, format_line_spacing_value(spec)
+
+    @classmethod
+    def _collect_line_spacing_config(cls, mode_label, value_text):
+        choice = cls._resolve_line_spacing_choice(mode_label)
+        preset = choice.get("preset")
+        if preset is not None:
+            return float(preset)
+
+        mode = choice.get("mode", "multiple")
+        normalized_value = cls._normalize_line_spacing_value(mode, value_text)
+        spec = normalize_line_spacing({"mode": mode, "value": normalized_value})
+        if spec["mode"] == "multiple":
+            return spec["value"]
+        return spec
+
     @staticmethod
     def _parse_spacing_to_config(value_str, default=0):
         """解析段前段后距离，转换为配置存储格式
@@ -1464,7 +1605,7 @@ class FormatterGUI:
         cfg["headings"]["h4"]["space_before"] = self._parse_spacing_to_config(self._v_h4sb.get())
         cfg["headings"]["h4"]["space_after"] = self._parse_spacing_to_config(self._v_h4sa.get())
         # body
-        cfg["body"]["line_spacing"] = self._v_lsp.get()
+        cfg["body"]["line_spacing"] = self._collect_line_spacing_config(self._v_lsp_mode.get(), self._v_lsp.get())
         cfg["body"]["first_line_indent"] = self._numval(self._v_ind.get())
         cfg["body"]["align"] = self._ALIGN.get(self._v_body_align.get(), "justify")
         cfg["body"]["space_before"] = self._parse_spacing_to_config(self._v_body_sb.get())
@@ -1489,7 +1630,7 @@ class FormatterGUI:
             "chapter_heading_level": int(self._v_cap_heading_level.get() or "1"),
             "chapter_separator": self._v_cap_chapter_sep.get(),
             "caption_separator": self._v_cap_caption_sep.get(),
-            "line_spacing": self._v_cap_ls.get(),
+            "line_spacing": self._collect_line_spacing_config(self._v_cap_ls_mode.get(), self._v_cap_ls.get()),
             "font": self._v_cap_font.get(),
             "number_font": self._v_cap_numfont.get(),
         }
@@ -1523,7 +1664,7 @@ class FormatterGUI:
         cfg["toc"]["font_size"] = self._numval(self._parse_unit_to_pt(self._v_tocsz.get()))
         cfg["toc"]["h1_font"] = self._v_toc_h1font.get()
         cfg["toc"]["h1_font_size"] = self._numval(self._parse_unit_to_pt(self._v_toc_h1sz.get()))
-        cfg["toc"]["line_spacing"] = self._v_tocls.get()
+        cfg["toc"]["line_spacing"] = self._collect_line_spacing_config(self._v_tocls_mode.get(), self._v_tocls.get())
         cfg["toc"]["space_before"] = self._parse_spacing_to_config(self._v_toc_sb.get())
         cfg["toc"]["space_after"] = self._parse_spacing_to_config(self._v_toc_sa.get())
         cfg["references"]["left_indent"] = self._numval(self._v_refind.get())
@@ -1531,8 +1672,8 @@ class FormatterGUI:
         cfg["table"]["top_border_sz"] = self._numval(self._v_tbl_top.get() * 8)
         cfg["table"]["header_border_sz"] = self._numval(self._v_tbl_hdr.get() * 8)
         cfg["table"]["bottom_border_sz"] = self._numval(self._v_tbl_bot.get() * 8)
-        cfg["table"]["line_spacing"] = self._v_tbl_ls.get()
-        cfg["footnote"]["line_spacing"] = self._v_fn_ls.get()
+        cfg["table"]["line_spacing"] = self._collect_line_spacing_config(self._v_tbl_ls_mode.get(), self._v_tbl_ls.get())
+        cfg["footnote"]["line_spacing"] = self._collect_line_spacing_config(self._v_fn_ls_mode.get(), self._v_fn_ls.get())
         # page_numbers
         cfg["page_numbers"]["front_format"] = self._PGFMT.get(self._v_pgfmt_f.get(), "upperRoman")
         cfg["page_numbers"]["body_format"] = self._PGFMT.get(self._v_pgfmt_b.get(), "decimal")
@@ -1597,25 +1738,27 @@ class FormatterGUI:
         # headings
         self._v_h1b.set(self._BOLD_R.get(cfg["headings"]["h1"]["bold"], "加粗"))
         self._v_h1a.set(self._ALIGN_R.get(cfg["headings"]["h1"]["align"], "左对齐"))
-        self._v_h1sb.set(str(cfg["headings"]["h1"].get("space_before", 0)) + "行")
-        self._v_h1sa.set(str(cfg["headings"]["h1"].get("space_after", 0)) + "行")
+        self._v_h1sb.set(format_paragraph_spacing_value(cfg["headings"]["h1"].get("space_before", 0)))
+        self._v_h1sa.set(format_paragraph_spacing_value(cfg["headings"]["h1"].get("space_after", 0)))
         self._v_h2b.set(self._BOLD_R.get(cfg["headings"]["h2"]["bold"], "加粗"))
         self._v_h2a.set(self._ALIGN_R.get(cfg["headings"]["h2"]["align"], "左对齐"))
-        self._v_h2sb.set(str(cfg["headings"]["h2"].get("space_before", 0)) + "行")
-        self._v_h2sa.set(str(cfg["headings"]["h2"].get("space_after", 0)) + "行")
+        self._v_h2sb.set(format_paragraph_spacing_value(cfg["headings"]["h2"].get("space_before", 0)))
+        self._v_h2sa.set(format_paragraph_spacing_value(cfg["headings"]["h2"].get("space_after", 0)))
         self._v_h3b.set(self._BOLD_R.get(cfg["headings"]["h3"]["bold"], "不加粗"))
         self._v_h3a.set(self._ALIGN_R.get(cfg["headings"]["h3"].get("align", "left"), "左对齐"))
-        self._v_h3sb.set(str(cfg["headings"]["h3"].get("space_before", 0)) + "行")
-        self._v_h3sa.set(str(cfg["headings"]["h3"].get("space_after", 0)) + "行")
+        self._v_h3sb.set(format_paragraph_spacing_value(cfg["headings"]["h3"].get("space_before", 0)))
+        self._v_h3sa.set(format_paragraph_spacing_value(cfg["headings"]["h3"].get("space_after", 0)))
         self._v_h4b.set(self._BOLD_R.get(cfg["headings"]["h4"]["bold"], "不加粗"))
         self._v_h4a.set(self._ALIGN_R.get(cfg["headings"]["h4"].get("align", "left"), "左对齐"))
-        self._v_h4sb.set(str(cfg["headings"]["h4"].get("space_before", 0)) + "行")
-        self._v_h4sa.set(str(cfg["headings"]["h4"].get("space_after", 0)) + "行")
+        self._v_h4sb.set(format_paragraph_spacing_value(cfg["headings"]["h4"].get("space_before", 0)))
+        self._v_h4sa.set(format_paragraph_spacing_value(cfg["headings"]["h4"].get("space_after", 0)))
         # body
-        self._v_lsp.set(cfg["body"]["line_spacing"])
+        body_ls_mode, body_ls_value = self._split_line_spacing_for_gui(cfg["body"]["line_spacing"])
+        self._v_lsp_mode.set(body_ls_mode)
+        self._v_lsp.set(body_ls_value)
         self._v_ind.set(cfg["body"]["first_line_indent"])
-        self._v_body_sb.set(str(cfg["body"].get("space_before", 0)) + "行")
-        self._v_body_sa.set(str(cfg["body"].get("space_after", 0)) + "行")
+        self._v_body_sb.set(format_paragraph_spacing_value(cfg["body"].get("space_before", 0)))
+        self._v_body_sa.set(format_paragraph_spacing_value(cfg["body"].get("space_after", 0)))
         # heading numbering patterns
         sec = cfg.get("sections", {})
         self._v_pat_h1.set(sec.get("chapter_pattern", ""))
@@ -1645,7 +1788,9 @@ class FormatterGUI:
         self._v_cap_heading_level.set(str(cap.get("chapter_heading_level", 1)))
         self._v_cap_chapter_sep.set(cap.get("chapter_separator", "."))
         self._v_cap_caption_sep.set(cap.get("caption_separator", ""))
-        self._v_cap_ls.set(cap.get("line_spacing", cfg["body"]["line_spacing"]))
+        cap_ls_mode, cap_ls_value = self._split_line_spacing_for_gui(cap.get("line_spacing", cfg["body"]["line_spacing"]))
+        self._v_cap_ls_mode.set(cap_ls_mode)
+        self._v_cap_ls.set(cap_ls_value)
         self._v_cap_font.set(cap.get("font", "宋体"))
         self._v_cap_numfont.set(cap.get("number_font", "Times New Roman"))
         # cover
@@ -1674,15 +1819,21 @@ class FormatterGUI:
         self._v_tocsz.set(str(self._numval(cfg["toc"].get("font_size", cfg["sizes"]["body"]))) + "pt")
         self._v_toc_h1font.set(cfg["toc"].get("h1_font", cfg["fonts"]["h1"]))
         self._v_toc_h1sz.set(str(self._numval(cfg["toc"].get("h1_font_size", cfg["sizes"]["h1"]))) + "pt")
-        self._v_tocls.set(cfg["toc"].get("line_spacing", cfg["body"]["line_spacing"]))
-        self._v_toc_sb.set(str(cfg["toc"].get("space_before", 0)) + "行")
-        self._v_toc_sa.set(str(cfg["toc"].get("space_after", 0)) + "行")
+        toc_ls_mode, toc_ls_value = self._split_line_spacing_for_gui(cfg["toc"].get("line_spacing", cfg["body"]["line_spacing"]))
+        self._v_tocls_mode.set(toc_ls_mode)
+        self._v_tocls.set(toc_ls_value)
+        self._v_toc_sb.set(format_paragraph_spacing_value(cfg["toc"].get("space_before", 0)))
+        self._v_toc_sa.set(format_paragraph_spacing_value(cfg["toc"].get("space_after", 0)))
         self._v_refind.set(cfg["references"]["left_indent"])
         self._v_tbl_top.set(cfg["table"]["top_border_sz"] / 8)
         self._v_tbl_hdr.set(cfg["table"]["header_border_sz"] / 8)
         self._v_tbl_bot.set(cfg["table"]["bottom_border_sz"] / 8)
-        self._v_tbl_ls.set(cfg["table"].get("line_spacing", 1.0))
-        self._v_fn_ls.set(cfg["footnote"].get("line_spacing", 1.0))
+        tbl_ls_mode, tbl_ls_value = self._split_line_spacing_for_gui(cfg["table"].get("line_spacing", 1.0))
+        self._v_tbl_ls_mode.set(tbl_ls_mode)
+        self._v_tbl_ls.set(tbl_ls_value)
+        fn_ls_mode, fn_ls_value = self._split_line_spacing_for_gui(cfg["footnote"].get("line_spacing", 1.0))
+        self._v_fn_ls_mode.set(fn_ls_mode)
+        self._v_fn_ls.set(fn_ls_value)
         # front_matter
         fm = cfg.get("front_matter", {})
         self._v_fm_mode.set(

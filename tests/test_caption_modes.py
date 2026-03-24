@@ -41,6 +41,25 @@ def _normal_style_xml(docx_path):
     return ET.tostring(style, encoding="unicode") if style is not None else ""
 
 
+def _style_spacing_attrs(docx_path, style_id):
+    with zipfile.ZipFile(docx_path, "r") as zf:
+        root = ET.fromstring(zf.read("word/styles.xml"))
+    ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    style = root.find(f"w:style[@w:styleId='{style_id}']", ns)
+    if style is None:
+        return {}
+    spacing = style.find("w:pPr/w:spacing", ns)
+    if spacing is None:
+        return {}
+    return {
+        "line": spacing.get(qn("w:line")),
+        "before": spacing.get(qn("w:before")),
+        "beforeLines": spacing.get(qn("w:beforeLines")),
+        "after": spacing.get(qn("w:after")),
+        "afterLines": spacing.get(qn("w:afterLines")),
+    }
+
+
 def _paragraph_xml(docx_path, index, strip_sectpr=False):
     doc = Document(str(docx_path))
     para_el = copy.deepcopy(doc.paragraphs[index]._element)
@@ -334,6 +353,41 @@ class CaptionModeTests(unittest.TestCase):
         self.assertNotIn(' TOC \o "1-', xml)
         texts = _document_texts(output_path)
         self.assertNotIn("目        录", texts)
+
+    def test_toc_styles_honor_configured_spacing(self):
+        doc = Document()
+        doc.add_paragraph("第1章 绪论", style="Heading 1")
+        doc.add_paragraph("1.1 研究背景", style="Heading 2")
+        input_path = self.tmpdir / "toc_spacing_input.docx"
+        doc.save(input_path)
+
+        cfg = copy.deepcopy(DEFAULT_CONFIG)
+        cfg["cover"]["enabled"] = False
+        cfg["toc"]["line_spacing"] = 2.0
+        cfg["toc"]["space_before"] = 1.0
+        cfg["toc"]["space_after"] = 0.5
+
+        output_path, _, _ = self._run_apply(input_path, cfg=cfg)
+
+        toc1_spacing = _style_spacing_attrs(output_path, "TOC1")
+        toc2_spacing = _style_spacing_attrs(output_path, "TOC2")
+        expected_line = str(int(cfg["toc"]["line_spacing"] * 240))
+        expected_toc1 = {
+            "line": expected_line,
+            "before": None,
+            "beforeLines": str(int(cfg["toc"]["space_before"] * 100)),
+            "after": None,
+            "afterLines": str(int(cfg["toc"]["space_after"] * 100)),
+        }
+        expected_toc2 = {
+            "line": expected_line,
+            "before": None,
+            "beforeLines": str(int(cfg["toc"]["space_before"] * 100)),
+            "after": None,
+            "afterLines": str(int(cfg["toc"]["space_after"] * 100)),
+        }
+        self.assertEqual(toc1_spacing, expected_toc1)
+        self.assertEqual(toc2_spacing, expected_toc2)
 
     def test_caption_line_spacing_can_differ_from_body(self):
         doc = Document()

@@ -1,7 +1,45 @@
 from ._titles import _find_special_display
-from ._common import get_paragraph_heading_level
+from ._common import get_paragraph_heading_level, parse_length, line_spacing_to_ooxml, paragraph_spacing_to_ooxml
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+
+
+def _set_snap_to_grid(ppr, enabled):
+    snap = ppr.find(qn("w:snapToGrid"))
+    if snap is None:
+        snap = OxmlElement("w:snapToGrid")
+        ppr.insert(0, snap)
+    snap.set(qn("w:val"), "1" if enabled else "0")
+
+
+def _apply_spacing_value(spacing, side, value):
+    spec = paragraph_spacing_to_ooxml(value)
+    attr = qn(f"w:{side}")
+    lines_attr = qn(f"w:{side}Lines")
+    auto_attr = qn(f"w:{side}Autospacing")
+    for key in (attr, lines_attr, auto_attr):
+        if key in spacing.attrib:
+            del spacing.attrib[key]
+    if spec["mode"] == "lines":
+        spacing.set(lines_attr, spec["value"])
+    else:
+        spacing.set(attr, spec["value"])
+
+
+def _ensure_spacing(ppr, line_twips=None, line_rule=None, before_value=None, after_value=None):
+    spacing = ppr.find(qn("w:spacing"))
+    if spacing is None:
+        spacing = OxmlElement("w:spacing")
+        ppr.append(spacing)
+    if line_twips is not None:
+        spacing.set(qn("w:line"), line_twips)
+    if line_rule is not None:
+        spacing.set(qn("w:lineRule"), line_rule)
+    if before_value is not None:
+        _apply_spacing_value(spacing, "before", before_value)
+    if after_value is not None:
+        _apply_spacing_value(spacing, "after", after_value)
+    return spacing
 
 
 def insert_toc(doc, cfg):
@@ -11,9 +49,12 @@ def insert_toc(doc, cfg):
     h1_sz_hp = str(int(cfg["sizes"]["h1"] * 2))
     toc_cfg = cfg["toc"]
     toc_font = toc_cfg.get("font", cfg["fonts"]["body"])
-    toc_sz_hp = str(int(toc_cfg.get("font_size", cfg["sizes"]["body"]) * 2))
+    toc_font_size = toc_cfg.get("font_size", cfg["sizes"]["body"])
+    toc_sz_hp = str(int(toc_font_size * 2))
     toc_ls = toc_cfg.get("line_spacing", cfg["body"]["line_spacing"])
-    toc_ls_twips = str(int(toc_ls * 240))
+    toc_ls_twips, toc_ls_rule = line_spacing_to_ooxml(toc_ls)
+    toc_sb_value = toc_cfg.get("space_before", 0)
+    toc_sa_value = toc_cfg.get("space_after", 0)
     latin = cfg["fonts"]["latin"]
 
     first_h1_el = None
@@ -41,6 +82,7 @@ def insert_toc(doc, cfg):
     toc_title_jc = OxmlElement("w:jc")
     toc_title_jc.set(qn("w:val"), "center")
     toc_title_ppr.append(toc_title_jc)
+    _set_snap_to_grid(toc_title_ppr, False)
     toc_title_spacing = OxmlElement("w:spacing")
     toc_title_spacing.set(qn("w:before"), "0")
     toc_title_spacing.set(qn("w:after"), "0")
@@ -73,10 +115,8 @@ def insert_toc(doc, cfg):
 
     toc_field = OxmlElement("w:p")
     toc_field_ppr = OxmlElement("w:pPr")
-    toc_field_spacing = OxmlElement("w:spacing")
-    toc_field_spacing.set(qn("w:line"), toc_ls_twips)
-    toc_field_spacing.set(qn("w:lineRule"), "auto")
-    toc_field_ppr.append(toc_field_spacing)
+    _set_snap_to_grid(toc_field_ppr, False)
+    _ensure_spacing(toc_field_ppr, line_twips=toc_ls_twips, line_rule=toc_ls_rule, before_value=toc_sb_value, after_value=toc_sa_value)
     toc_field.append(toc_field_ppr)
 
     run_begin = OxmlElement("w:r")
@@ -145,9 +185,12 @@ def insert_toc(doc, cfg):
 def ensure_toc_styles(doc, cfg):
     toc_cfg = cfg["toc"]
     toc_font = toc_cfg.get("font", cfg["fonts"]["body"])
-    toc_sz_hp = str(int(toc_cfg.get("font_size", cfg["sizes"]["body"]) * 2))
+    toc_font_size = toc_cfg.get("font_size", cfg["sizes"]["body"])
+    toc_sz_hp = str(int(toc_font_size * 2))
     toc_h1_font = toc_cfg.get("h1_font", cfg["fonts"]["h1"])
-    toc_h1_sz_hp = str(int(toc_cfg.get("h1_font_size", cfg["sizes"]["h1"]) * 2))
+    toc_h1_font_size = toc_cfg.get("h1_font_size", cfg["sizes"]["h1"])
+    toc_h1_sz_hp = str(int(toc_h1_font_size * 2))
+    toc_ls_twips, toc_ls_rule = line_spacing_to_ooxml(toc_cfg.get("line_spacing", cfg["body"]["line_spacing"]))
     latin = cfg["fonts"]["latin"]
 
     styles_el = doc.styles.element
@@ -158,6 +201,9 @@ def ensure_toc_styles(doc, cfg):
         style_id = f"TOC{i}"
         ea = toc_h1_font if i == 1 else toc_font
         sz_hp = toc_h1_sz_hp if i == 1 else toc_sz_hp
+        level_font_size = toc_h1_font_size if i == 1 else toc_font_size
+        toc_sb_value = toc_cfg.get("space_before", 0)
+        toc_sa_value = toc_cfg.get("space_after", 0)
         found = styles_el.find(f'.//w:style[@w:styleId="{style_id}"]', ns)
         if found is not None:
             rpr = found.find("w:rPr", ns)
@@ -184,6 +230,12 @@ def ensure_toc_styles(doc, cfg):
                 szCs = OxmlElement("w:szCs")
                 rpr.append(szCs)
             szCs.set(qn("w:val"), sz_hp)
+            ppr = found.find("w:pPr", ns)
+            if ppr is None:
+                ppr = OxmlElement("w:pPr")
+                found.append(ppr)
+            _set_snap_to_grid(ppr, False)
+            _ensure_spacing(ppr, line_twips=toc_ls_twips, line_rule=toc_ls_rule, before_value=toc_sb_value, after_value=toc_sa_value)
             continue
 
         style_el = OxmlElement("w:style")
@@ -227,12 +279,8 @@ def ensure_toc_styles(doc, cfg):
         style_el.append(rpr)
 
         ppr = OxmlElement("w:pPr")
-        spacing = OxmlElement("w:spacing")
-        spacing.set(qn("w:line"), "360")
-        spacing.set(qn("w:lineRule"), "auto")
-        spacing.set(qn("w:before"), "0")
-        spacing.set(qn("w:after"), "0")
-        ppr.append(spacing)
+        _set_snap_to_grid(ppr, False)
+        _ensure_spacing(ppr, line_twips=toc_ls_twips, line_rule=toc_ls_rule, before_value=toc_sb_value, after_value=toc_sa_value)
         ind = OxmlElement("w:ind")
         ind.set(qn("w:firstLine"), "0")
         if i > 1:
@@ -241,3 +289,4 @@ def ensure_toc_styles(doc, cfg):
         style_el.append(ppr)
 
         styles_el.append(style_el)
+

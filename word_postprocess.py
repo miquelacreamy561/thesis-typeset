@@ -17,9 +17,11 @@ from ctypes import wintypes
 import pythoncom
 import win32com.client as win32
 
+from thesis_formatter._common import parse_length, paragraph_spacing_to_word
+
 wdAlertsNone = 0
 wdColorBlack = 0
-wdLineSpace1pt5 = 1
+wdLineSpaceMultiple = 5
 msoAutomationSecurityForceDisable = 3
 
 
@@ -58,6 +60,20 @@ def _terminate_process(pid, timeout=5):
     return result.returncode == 0
 
 
+def _apply_word_spacing(fmt, side, value):
+    spec = paragraph_spacing_to_word(value)
+    side_cap = side[0].upper() + side[1:]
+    line_unit_attr = f"LineUnit{side_cap}"
+    space_attr = f"Space{side_cap}"
+    if spec["mode"] == "lines":
+        # Clear inherited point spacing first; Word otherwise keeps values like 10pt when line-units are zero.
+        setattr(fmt, space_attr, 0)
+        setattr(fmt, line_unit_attr, float(spec["value"]))
+    else:
+        setattr(fmt, line_unit_attr, 0)
+        setattr(fmt, space_attr, float(spec["value"]))
+
+
 def postprocess(docx_path, timeout=90, config=None):
     docx_path = os.path.abspath(docx_path)
     if not os.path.exists(docx_path):
@@ -72,12 +88,18 @@ def postprocess(docx_path, timeout=90, config=None):
         toc_size = toc_cfg.get("font_size", sizes_cfg.get("body", 12))
         toc_h1_ea = toc_cfg.get("h1_font", fonts_cfg.get("h1", toc_ea))
         toc_h1_size = toc_cfg.get("h1_font_size", sizes_cfg.get("h1", toc_size))
+        toc_line_spacing = toc_cfg.get("line_spacing", 1.5)
+        toc_space_before_cfg = toc_cfg.get("space_before", 0)
+        toc_space_after_cfg = toc_cfg.get("space_after", 0)
     else:
         toc_latin = "Times New Roman"
         toc_ea = "宋体"
         toc_size = 12
         toc_h1_ea = toc_ea
         toc_h1_size = toc_size
+        toc_line_spacing = 1.5
+        toc_space_before_cfg = 0
+        toc_space_after_cfg = 0
 
     result = {"ok": False, "error": None, "pid": None}
     done_event = threading.Event()
@@ -112,6 +134,7 @@ def postprocess(docx_path, timeout=90, config=None):
             print("[2/3] Done.", flush=True)
 
             print(f"[3/3] Fixing TOC fonts (L1: {toc_h1_ea} {toc_h1_size}pt, L2+: {toc_ea} {toc_size}pt)...", flush=True)
+            seen_toc_styles = set()
             for toc in doc.TablesOfContents:
                 for p in toc.Range.Paragraphs:
                     try:
@@ -123,14 +146,33 @@ def postprocess(docx_path, timeout=90, config=None):
                     if m:
                         level = int(m.group(1))
                     is_level1 = level == 1
+                    level_font_size = toc_h1_size if is_level1 else toc_size
+                    style_obj = p.Style
+                    style_fmt = style_obj.ParagraphFormat
+                    style_name = str(sname)
                     p.Range.Font.Name = toc_latin
                     p.Range.Font.NameFarEast = toc_h1_ea if is_level1 else toc_ea
-                    p.Range.Font.Size = toc_h1_size if is_level1 else toc_size
+                    p.Range.Font.Size = level_font_size
                     p.Range.Font.Bold = False
                     p.Range.Font.ColorIndex = wdColorBlack
-                    p.Format.LineSpacingRule = wdLineSpace1pt5
-                    p.Format.SpaceBefore = 0
-                    p.Format.SpaceAfter = 0
+                    try:
+                        p.Format.DisableLineHeightGrid = True
+                    except Exception:
+                        pass
+                    try:
+                        style_fmt.DisableLineHeightGrid = True
+                    except Exception:
+                        pass
+                    if style_name not in seen_toc_styles:
+                        _apply_word_spacing(style_fmt, "before", toc_space_before_cfg)
+                        _apply_word_spacing(style_fmt, "after", toc_space_after_cfg)
+                        seen_toc_styles.add(style_name)
+                    # Reuse the resolved TOC style spacing from Word itself instead of recomputing
+                    # multiple spacing from the run font size. This matches the paragraph dialog.
+                    p.Format.LineSpacingRule = style_fmt.LineSpacingRule
+                    p.Format.LineSpacing = style_fmt.LineSpacing
+                    _apply_word_spacing(p.Format, "before", toc_space_before_cfg)
+                    _apply_word_spacing(p.Format, "after", toc_space_after_cfg)
             print("[3/3] Done.", flush=True)
 
             doc.Save()
@@ -187,3 +229,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

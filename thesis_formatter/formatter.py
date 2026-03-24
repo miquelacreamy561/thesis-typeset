@@ -19,7 +19,7 @@ from ._common import (
     _ensure_keep_next, _set_para_spacing, _check_caption_numbering,
     is_heading, contains_cjk, normalize_cn_keywords, normalize_en_keywords,
     get_paragraph_heading_level, get_heading_style, is_heading_style,
-    _ALL_HEADING_NAMES, parse_length,
+    _ALL_HEADING_NAMES, parse_length, apply_line_spacing, apply_paragraph_spacing,
 )
 from ._titles import _find_special_display, _get_special_title_map, _detect_front_matter
 from .headings import auto_assign_heading_styles, renumber_headings, normalize_heading_spacing
@@ -275,9 +275,9 @@ def apply_format(input_path, output_path, config=None, config_path=None):
         sb = hcfg.get("space_before", 0)
         sa = hcfg.get("space_after", 0)
         if sb >= 0:
-            style.paragraph_format.space_before = parse_length(sb * 12)
+            apply_paragraph_spacing(style.paragraph_format, "before", sb)
         if sa >= 0:
-            style.paragraph_format.space_after = parse_length(sa * 12)
+            apply_paragraph_spacing(style.paragraph_format, "after", sa)
 
     if not preserve_front_matter:
         _set_heading_style(1, h1_font, h1_size, h1_bold, h1_align, cfg["headings"]["h1"])
@@ -293,8 +293,8 @@ def apply_format(input_path, output_path, config=None, config_path=None):
         st.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
         _toc_h_sb = cfg["toc"].get("space_before", 0)
         _toc_h_sa = cfg["toc"].get("space_after", 0)
-        st.paragraph_format.space_before = parse_length(_toc_h_sb * 12)
-        st.paragraph_format.space_after = parse_length(_toc_h_sa * 12)
+        apply_paragraph_spacing(st.paragraph_format, "before", _toc_h_sb)
+        apply_paragraph_spacing(st.paragraph_format, "after", _toc_h_sa)
 
     ensure_toc_styles(doc, cfg)
 
@@ -303,8 +303,8 @@ def apply_format(input_path, output_path, config=None, config_path=None):
     toc_h1_font = cfg["toc"].get("h1_font", cfg["fonts"]["h1"])
     toc_h1_size = parse_length(cfg["toc"].get("h1_font_size", cfg["sizes"]["h1"]))
     toc_content_ls = cfg["toc"].get("line_spacing", body_ls)
-    toc_sb = parse_length(cfg["toc"].get("space_before", 0) * 12)
-    toc_sa = parse_length(cfg["toc"].get("space_after", 0) * 12)
+    toc_sb = cfg["toc"].get("space_before", 0)
+    toc_sa = cfg["toc"].get("space_after", 0)
 
     for para in doc.paragraphs:
         if _is_preserved_front_para(para):
@@ -313,9 +313,9 @@ def apply_format(input_path, output_path, config=None, config_path=None):
         if sn.lower().startswith("toc ") or sn == "\u6837\u5f0f3":
             is_toc1 = sn.lower() == "toc 1"
             para.paragraph_format.first_line_indent = parse_length(0)
-            para.paragraph_format.line_spacing = toc_content_ls
-            para.paragraph_format.space_before = toc_sb
-            para.paragraph_format.space_after = toc_sa
+            apply_line_spacing(para.paragraph_format, toc_content_ls)
+            apply_paragraph_spacing(para.paragraph_format, "before", toc_sb)
+            apply_paragraph_spacing(para.paragraph_format, "after", toc_sa)
             ea = toc_h1_font if is_toc1 else toc_content_font
             sz = toc_h1_size if is_toc1 else toc_content_size
             set_para_runs_font(para, east_asia=ea, size_pt=sz,
@@ -327,7 +327,7 @@ def apply_format(input_path, output_path, config=None, config_path=None):
                            bold=False, latin=latin)
     if "Footnote Text" in doc.styles:
         ft = doc.styles["Footnote Text"]
-        ft.paragraph_format.line_spacing = cfg["footnote"]["line_spacing"]
+        apply_line_spacing(ft.paragraph_format, cfg["footnote"]["line_spacing"])
         ft.paragraph_format.first_line_indent = parse_length(0)
         _fn_align = _ALIGN_MAP.get(cfg["footnote"].get("align", "justify"))
         if _fn_align is not None:
@@ -350,18 +350,18 @@ def apply_format(input_path, output_path, config=None, config_path=None):
             hkey = {1: "h1", 2: "h2", 3: "h3", 4: "h4"}.get(level, "h1")
             hcfg = cfg["headings"].get(hkey, {})
             if hcfg.get("space_before", 0) >= 0:
-                para.paragraph_format.space_before = parse_length(0)
+                apply_paragraph_spacing(para.paragraph_format, "before", 0)
             if hcfg.get("space_after", 0) >= 0:
-                para.paragraph_format.space_after = parse_length(0)
+                apply_paragraph_spacing(para.paragraph_format, "after", 0)
         else:
-            para.paragraph_format.space_before = parse_length(cfg["body"].get("space_before", 0) * 12)
-            para.paragraph_format.space_after = parse_length(cfg["body"].get("space_after", 0) * 12)
+            apply_paragraph_spacing(para.paragraph_format, "before", cfg["body"].get("space_before", 0))
+            apply_paragraph_spacing(para.paragraph_format, "after", cfg["body"].get("space_after", 0))
         pf = para.paragraph_format
         if para.style and para.style.name in ["Normal", "Body Text", "First Paragraph", "_Style 2"]:
             if body_align is not None:
                 pf.alignment = body_align
             pf.first_line_indent = body_indent
-            pf.line_spacing = body_ls
+            apply_line_spacing(pf, body_ls)
             set_para_runs_font(para, east_asia=body_font, size_pt=body_size,
                                bold=False, latin=latin)
 
@@ -390,7 +390,7 @@ def apply_format(input_path, output_path, config=None, config_path=None):
             p.text = abstract_display
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             p.paragraph_format.first_line_indent = parse_length(0)
-            p.paragraph_format.line_spacing = body_ls
+            apply_line_spacing(p.paragraph_format, body_ls)
             set_para_runs_font(p, east_asia=h1_font, size_pt=h1_size, bold=True, latin=latin)
 
         cn_kw_re = sec.get("cn_keywords_pattern", r"^\s*\u5173\u952e\u8bcd\s*[\uff1a:]")
@@ -409,7 +409,7 @@ def apply_format(input_path, output_path, config=None, config_path=None):
                 p.clear()
                 p.alignment = WD_ALIGN_PARAGRAPH.LEFT
                 p.paragraph_format.first_line_indent = parse_length(0)
-                p.paragraph_format.line_spacing = body_ls
+                apply_line_spacing(p.paragraph_format, body_ls)
                 r1 = p.add_run("\u5173\u952e\u8bcd\uff1a")
                 set_run_font(r1, east_asia=h1_font, size_pt=body_size, bold=True, latin=latin)
                 r2 = p.add_run(content)
@@ -420,7 +420,7 @@ def apply_format(input_path, output_path, config=None, config_path=None):
                 p.clear()
                 p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
                 p.paragraph_format.first_line_indent = parse_length(0)
-                p.paragraph_format.line_spacing = body_ls
+                apply_line_spacing(p.paragraph_format, body_ls)
                 r1 = p.add_run("Abstract: ")
                 set_run_font(r1, east_asia=latin, size_pt=body_size, bold=True, latin=latin)
                 r2 = p.add_run(content)
@@ -432,7 +432,7 @@ def apply_format(input_path, output_path, config=None, config_path=None):
                 p.clear()
                 p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
                 p.paragraph_format.first_line_indent = parse_length(0)
-                p.paragraph_format.line_spacing = body_ls
+                apply_line_spacing(p.paragraph_format, body_ls)
                 r1 = p.add_run("Key words: ")
                 set_run_font(r1, east_asia=latin, size_pt=body_size, bold=True, latin=latin)
                 r2 = p.add_run(content)
@@ -441,12 +441,12 @@ def apply_format(input_path, output_path, config=None, config_path=None):
                 en_title_seen = True
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 p.paragraph_format.first_line_indent = parse_length(0)
-                p.paragraph_format.line_spacing = body_ls
+                apply_line_spacing(p.paragraph_format, body_ls)
                 set_para_runs_font(p, east_asia=latin, size_pt=h1_size, bold=True, latin=latin)
             elif not past_abstract and en_title_seen and not contains_cjk(t) and not re.match(r"^[\(\uff08]", t) and not re.match(r"^\s*(Abstract|Key\s*words)\s*:", t, re.I):
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 p.paragraph_format.first_line_indent = parse_length(0)
-                p.paragraph_format.line_spacing = body_ls
+                apply_line_spacing(p.paragraph_format, body_ls)
                 set_para_runs_font(p, east_asia=latin, size_pt=body_size, bold=False, latin=latin)
             elif not past_abstract and re.match(r"^[\(\uff08]", t) and re.search(r"(China|University|College)", t, re.I):
                 new_t = t
@@ -458,20 +458,20 @@ def apply_format(input_path, output_path, config=None, config_path=None):
                     p.text = new_t
                 p.alignment = WD_ALIGN_PARAGRAPH.CENTER
                 p.paragraph_format.first_line_indent = parse_length(0)
-                p.paragraph_format.line_spacing = body_ls
+                apply_line_spacing(p.paragraph_format, body_ls)
                 set_para_runs_font(p, east_asia=latin, size_pt=body_size, bold=False, latin=latin)
             else:
                 if contains_cjk(t):
                     if body_align is not None:
                         p.alignment = body_align
                     p.paragraph_format.first_line_indent = body_indent
-                    p.paragraph_format.line_spacing = body_ls
+                    apply_line_spacing(p.paragraph_format, body_ls)
                     set_para_runs_font(p, east_asia=body_font, size_pt=body_size,
                                        bold=False, latin=latin)
                 elif t:
                     p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
                     p.paragraph_format.first_line_indent = parse_length(0)
-                    p.paragraph_format.line_spacing = body_ls
+                    apply_line_spacing(p.paragraph_format, body_ls)
                     set_para_runs_font(p, east_asia=latin, size_pt=body_size,
                                        bold=False, latin=latin)
 
@@ -484,13 +484,13 @@ def apply_format(input_path, output_path, config=None, config_path=None):
         if align is not None:
             para.alignment = align
         para.paragraph_format.first_line_indent = parse_length(0)
-        para.paragraph_format.line_spacing = body_ls
+        apply_line_spacing(para.paragraph_format, body_ls)
         sb = hcfg.get("space_before", 0)
         sa = hcfg.get("space_after", 0)
         if sb >= 0:
-            para.paragraph_format.space_before = parse_length(sb * 12)
+            apply_paragraph_spacing(para.paragraph_format, "before", sb)
         if sa >= 0:
-            para.paragraph_format.space_after = parse_length(sa * 12)
+            apply_paragraph_spacing(para.paragraph_format, "after", sa)
         set_para_runs_font(para, east_asia=font, size_pt=size, bold=bold, latin=latin)
 
     for para in doc.paragraphs:
@@ -506,14 +506,14 @@ def apply_format(input_path, output_path, config=None, config_path=None):
             para.text = entry["display"]
             para.alignment = _ALIGN_MAP.get(entry.get("align", "center"), WD_ALIGN_PARAGRAPH.CENTER)
             para.paragraph_format.first_line_indent = parse_length(0)
-            para.paragraph_format.line_spacing = body_ls
+            apply_line_spacing(para.paragraph_format, body_ls)
             _h1cfg = cfg["headings"]["h1"]
             _sb = _h1cfg.get("space_before", 0)
             _sa = _h1cfg.get("space_after", 0)
             if _sb >= 0:
-                para.paragraph_format.space_before = parse_length(_sb * 12)
+                apply_paragraph_spacing(para.paragraph_format, "before", _sb)
             if _sa >= 0:
-                para.paragraph_format.space_after = parse_length(_sa * 12)
+                apply_paragraph_spacing(para.paragraph_format, "after", _sa)
             set_para_runs_font(para, east_asia=h1_font, size_pt=h1_size,
                                bold=True, latin=latin)
         elif level == 1:
@@ -537,13 +537,13 @@ def apply_format(input_path, output_path, config=None, config_path=None):
             _apply_heading_para(para, h4_align, cfg["headings"]["h4"], h4_font, h4_size, h4_bold)
         elif level == 1:
             para.paragraph_format.first_line_indent = parse_length(0)
-            para.paragraph_format.line_spacing = body_ls
+            apply_line_spacing(para.paragraph_format, body_ls)
             sb = cfg["headings"]["h1"].get("space_before", 0)
             sa = cfg["headings"]["h1"].get("space_after", 0)
             if sb >= 0:
-                para.paragraph_format.space_before = parse_length(sb * 12)
+                apply_paragraph_spacing(para.paragraph_format, "before", sb)
             if sa >= 0:
-                para.paragraph_format.space_after = parse_length(sa * 12)
+                apply_paragraph_spacing(para.paragraph_format, "after", sa)
             if t_nospace in st_map:
                 entry = st_map[t_nospace]
                 para.text = entry["display"]
@@ -572,7 +572,7 @@ def apply_format(input_path, output_path, config=None, config_path=None):
         if in_refs and para.text.strip() and not (para.style and is_heading_style(para.style)):
             para.paragraph_format.first_line_indent = parse_length(ref_cfg["first_line_indent"])
             para.paragraph_format.left_indent = parse_length(ref_cfg["left_indent"])
-            para.paragraph_format.line_spacing = body_ls
+            apply_line_spacing(para.paragraph_format, body_ls)
             set_para_runs_font(para, east_asia=body_font, size_pt=body_size,
                                bold=False, latin=latin)
 
@@ -612,27 +612,27 @@ def apply_format(input_path, output_path, config=None, config_path=None):
         if re.match(fig_pat, t) or re.match(r"^Figure\s*\d", t, re.I) or re.match(r"^\u56fe[A-Z]\d+", t):
             para.alignment = WD_ALIGN_PARAGRAPH.CENTER
             para.paragraph_format.first_line_indent = parse_length(0)
-            para.paragraph_format.line_spacing = cap_ls
+            apply_line_spacing(para.paragraph_format, cap_ls)
             para.paragraph_format.space_after = spacing_line
             set_para_runs_font(para, east_asia=body_font, size_pt=caption_size,
                                bold=False, latin=latin)
         elif re.match(tbl_pat, t) or re.match(r"^Table\s*\d", t, re.I) or re.match(r"^(\u7eed)?\u8868[A-Z]\d+", t):
             para.alignment = WD_ALIGN_PARAGRAPH.CENTER
             para.paragraph_format.first_line_indent = parse_length(0)
-            para.paragraph_format.line_spacing = cap_ls
+            apply_line_spacing(para.paragraph_format, cap_ls)
             para.paragraph_format.space_before = spacing_line
             set_para_runs_font(para, east_asia=body_font, size_pt=caption_size,
                                bold=False, latin=latin)
         elif re.match(subfig_pat, t):
             para.alignment = WD_ALIGN_PARAGRAPH.CENTER
             para.paragraph_format.first_line_indent = parse_length(0)
-            para.paragraph_format.line_spacing = cap_ls
+            apply_line_spacing(para.paragraph_format, cap_ls)
             set_para_runs_font(para, east_asia=body_font, size_pt=caption_size,
                                bold=False, latin=latin)
         elif re.match(note_pat, t) or re.match(source_pat, t):
             para.alignment = WD_ALIGN_PARAGRAPH.LEFT
             para.paragraph_format.first_line_indent = parse_length(0)
-            para.paragraph_format.line_spacing = cap_ls
+            apply_line_spacing(para.paragraph_format, cap_ls)
             set_para_runs_font(para, east_asia=body_font, size_pt=note_size,
                                bold=False, latin=latin)
 
@@ -722,10 +722,10 @@ def apply_format(input_path, output_path, config=None, config_path=None):
                 for p in cell.paragraphs:
                     if tbl_cell_align is not None:
                         p.alignment = tbl_cell_align
-                    p.paragraph_format.space_before = parse_length(0)
-                    p.paragraph_format.space_after = parse_length(0)
+                    apply_paragraph_spacing(p.paragraph_format, "before", 0)
+                    apply_paragraph_spacing(p.paragraph_format, "after", 0)
                     p.paragraph_format.first_line_indent = parse_length(0)
-                    p.paragraph_format.line_spacing = tbl_cfg["line_spacing"]
+                    apply_line_spacing(p.paragraph_format, tbl_cfg["line_spacing"])
                     set_para_runs_font(p, east_asia=body_font, size_pt=caption_size,
                                        bold=False, latin=latin)
 
