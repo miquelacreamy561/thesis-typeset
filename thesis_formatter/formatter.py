@@ -25,7 +25,7 @@ from ._common import (
 from ._titles import _find_special_display, _get_special_title_map, _detect_front_matter
 from .headings import auto_assign_heading_styles, renumber_headings, normalize_heading_spacing, demote_abstract_heading_styles
 from .references import check_citations, apply_ref_crosslinks
-from .page import normalize_sections, setup_page_numbers, insert_page_break_after, find_first_body_heading
+from .page import normalize_sections, setup_page_numbers, setup_page_numbers_strict, insert_page_break_after, find_first_body_heading
 from .headers import setup_headers
 from .toc import insert_toc, ensure_toc_styles
 from .cover import _has_cover, find_existing_cover_end, insert_cover_and_declaration
@@ -170,8 +170,22 @@ def apply_format(input_path, output_path, config=None, config_path=None):
     toc_only = toc_cfg.get("only_insert", False)
     cover_cfg = cfg.get("cover", {})
     cover_only = cover_cfg.get("only_insert", False)
+    page_numbers_cfg = cfg.get("page_numbers", {})
+    page_numbers_only = page_numbers_cfg.get("only_insert", False)
+    header_footer_cfg = cfg.get("header_footer", {})
+    header_only = header_footer_cfg.get("only_insert", False)
     custom_cover = cover_cfg.get("custom_docx", "")
     use_custom_cover = bool(custom_cover and os.path.isfile(custom_cover))
+
+    local_modes = {
+        "toc": toc_only,
+        "cover": cover_only,
+        "page_numbers": page_numbers_only,
+        "header_footer": header_only,
+    }
+    active_local_modes = [name for name, enabled in local_modes.items() if enabled]
+    if len(active_local_modes) > 1:
+        raise RuntimeError("单独处理模式不能同时启用多个。")
 
     if cover_only:
         if not use_custom_cover:
@@ -182,10 +196,22 @@ def apply_format(input_path, output_path, config=None, config_path=None):
             raise RuntimeError(f"自定义封面插入失败: {err}")
         cfg.setdefault("_runtime", {})["custom_cover_sections"] = 1
         cfg["_runtime"]["cover_only"] = True
+        cfg["_runtime"]["local_mode"] = "cover"
         return []
 
     doc = Document(input_path)
 
+    if page_numbers_only:
+        setup_page_numbers_strict(doc, cfg)
+        cfg.setdefault("_runtime", {})["local_mode"] = "page_numbers"
+        doc.save(output_path)
+        return []
+
+    if header_only:
+        setup_headers(doc, cfg)
+        cfg.setdefault("_runtime", {})["local_mode"] = "header_footer"
+        doc.save(output_path)
+        return []
     def _configure_toc_styles():
         if "TOC Heading" in doc.styles:
             st = doc.styles["TOC Heading"]
@@ -227,9 +253,9 @@ def apply_format(input_path, output_path, config=None, config_path=None):
         if toc_enabled:
             _configure_toc_styles()
             insert_toc(doc, cfg)
+        cfg.setdefault("_runtime", {})["local_mode"] = "toc"
         doc.save(output_path)
         return []
-
     fm_mode = cfg.get("front_matter", {}).get("mode", "auto")
 
     preserve_until_idx = 0
@@ -934,6 +960,7 @@ def main():
     cfg, cfg_path = resolve_config(cli_config=args.config, input_path=args.input)
     apply_format(args.input, args.output, config=cfg, config_path=cfg_path)
     print(f"OK {args.output}")
+
 
 
 

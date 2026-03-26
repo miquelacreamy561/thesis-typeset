@@ -328,7 +328,7 @@ def _setup_single_section_pn(doc, cfg):
             add_page_number_field(ep, cfg, align=actual_pos)
 
 
-def setup_page_numbers(doc, cfg):
+def _apply_page_numbers_to_sections(doc, cfg, body_section_index):
     pn = cfg["page_numbers"]
     front_pos = pn.get("front_position", "center")
     body_pos = pn.get("body_position", "center")
@@ -338,25 +338,6 @@ def setup_page_numbers(doc, cfg):
     hf_diff_oe = cfg.get("header_footer", {}).get("different_odd_even", False) and \
                  cfg.get("header_footer", {}).get("enabled", False)
     need_even_odd = need_alternate or hf_diff_oe
-
-    first_body_h1 = find_first_body_heading(doc, cfg)
-    if first_body_h1 is None:
-        _setup_single_section_pn(doc, cfg)
-        _finalize_cover_section_page_numbers(doc, cfg)
-        return
-
-    new_sect_pr = insert_section_break_before(first_body_h1)
-    if new_sect_pr is None:
-        _setup_single_section_pn(doc, cfg)
-        _finalize_cover_section_page_numbers(doc, cfg)
-        return
-
-    for attr in ["pgSz", "pgMar"]:
-        existing = doc.sections[0]._sectPr.find(qn(f"w:{attr}"))
-        if existing is not None:
-            new_sect_pr.append(copy.deepcopy(existing))
-
-    body_section_index = get_body_start_section_index(doc, cfg, first_body_h1)
 
     for idx, section in enumerate(doc.sections):
         if idx < body_section_index:
@@ -370,7 +351,7 @@ def setup_page_numbers(doc, cfg):
         _set_even_odd_on_doc(doc)
 
     for idx, section in enumerate(doc.sections):
-        is_body = len(doc.sections) > 1 and idx >= body_section_index
+        is_body = idx >= body_section_index
         pos = body_pos if is_body else front_pos
 
         footer = section.footer
@@ -398,6 +379,42 @@ def setup_page_numbers(doc, cfg):
                     p.clear()
                 ep = even_footer.paragraphs[0] if even_footer.paragraphs else even_footer.add_paragraph()
                 add_page_number_field(ep, cfg, align=actual_pos)
-    _finalize_cover_section_page_numbers(doc, cfg, body_section_index=body_section_index if len(doc.sections) > 1 else None)
+
+    _finalize_cover_section_page_numbers(
+        doc,
+        cfg,
+        body_section_index=body_section_index if len(doc.sections) > 1 else None,
+    )
 
 
+def setup_page_numbers(doc, cfg):
+    first_body_h1 = find_first_body_heading(doc, cfg)
+    if first_body_h1 is None:
+        _setup_single_section_pn(doc, cfg)
+        _finalize_cover_section_page_numbers(doc, cfg)
+        return
+
+    new_sect_pr = insert_section_break_before(first_body_h1)
+    if new_sect_pr is None:
+        _setup_single_section_pn(doc, cfg)
+        _finalize_cover_section_page_numbers(doc, cfg)
+        return
+
+    for attr in ["pgSz", "pgMar"]:
+        existing = doc.sections[0]._sectPr.find(qn(f"w:{attr}"))
+        if existing is not None:
+            new_sect_pr.append(copy.deepcopy(existing))
+
+    body_section_index = get_body_start_section_index(doc, cfg, first_body_h1)
+    _apply_page_numbers_to_sections(doc, cfg, body_section_index)
+
+
+def setup_page_numbers_strict(doc, cfg):
+    if len(doc.sections) <= 1:
+        _setup_single_section_pn(doc, cfg)
+        _finalize_cover_section_page_numbers(doc, cfg)
+        return
+
+    first_body_h1 = find_first_body_heading(doc, cfg)
+    body_section_index = get_body_start_section_index(doc, cfg, first_body_h1)
+    _apply_page_numbers_to_sections(doc, cfg, body_section_index)
