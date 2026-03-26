@@ -35,3 +35,4 @@ FORMATTING_SPEC.md
 tmp_test_artifacts/
 =1.10.0
 旧/
+.worktrees/
