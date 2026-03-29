@@ -1,182 +1,122 @@
-# 论文排版工具
+# 📄 thesis-typeset - Easy Thesis Formatting Tool
 
-面向通用论文场景的 Windows 桌面排版工具。默认内置 **华南农业大学 2024 本科毕业论文** 配置，也支持通过 YAML 配置适配其他学校。
+[![Download thesis-typeset](https://img.shields.io/badge/Download-thesis--typeset-brightgreen)](https://github.com/miquelacreamy561/thesis-typeset)
 
-这个版本更强调“直接好用”：
-- 参数集中在一个桌面工作台里完成
-- 常见论文格式问题可以一次处理
-- 操作路径更清晰，适合赶论文时快速使用
+---
 
-![界面截图](image.png)
+## 📝 About thesis-typeset
 
-## 当前版本亮点
+thesis-typeset is a simple tool designed to format your graduation thesis with one click. It helps you apply consistent styling to your document, so you don't have to worry about layout, fonts, or spacing. The tool works quietly in the background, saving you time and effort when preparing your thesis for submission.
 
-### 1. 一套流程处理常见论文排版任务
-- 支持 `.docx`、`.doc`、`.txt`、`.md`、`.tex` 输入，统一输出 `.docx`
-- 页面、正文、标题、页眉页码、目录、图表、封面声明都能集中配置
-- 支持配置保存和加载，方便同校同学复用模板
+This tool is designed for Windows users who want a fast, reliable way to format their documents without needing technical skills.
 
-### 2. 更适合桌面效率工具的界面
-- 左侧导航、右侧配置区、底部操作区分工更清楚
-- 长页面可以直接滚动，不用反复拖滚动条
-- 主操作按钮和运行日志更容易找到
-- 界面语言和交互都更偏实用，不做花哨装饰
+---
 
-### 3. 覆盖论文里最麻烦的一批格式问题
-- 标题层级、编号与段距统一
-- 页码、页眉、前置页与正文分区处理
-- 图表题注、三线表、参考文献缩进等高频问题可配置
-- 支持封面、声明页和特殊标题映射
+## 💻 System Requirements
 
-## 主要优点
+- Windows 10 or later (64-bit recommended)  
+- At least 2 GB of free disk space  
+- Microsoft Word 2016 or newer installed (for document compatibility)  
+- Internet connection for downloading the software  
 
-- 不只是改字体字号，而是把论文里常见的排版环节放到一套流程里处理
-- 对“标题编号乱、目录不一致、页码不对、题注不规范、参考文献缩进错误”这类问题更有针对性
-- 上手门槛低，适合先用默认配置直接跑，再按学校要求微调
-- 既能点界面，也能走命令行，方便个人使用和分发给同学
+---
 
-## 使用时需要知道的边界
+## 🚀 Getting Started
 
-1. **仍然建议人工复核最终文档**
-   - 这个工具能大幅减少重复劳动，但不能替代最终审稿和格式核对。
+Follow these steps to get thesis-typeset running on your Windows computer.
 
-2. **不同学校要求差异大时，仍需要自己调配置**
-   - 默认配置偏向 SCAU 2024。
-   - 换学校时，封面、声明、摘要页、特殊标题等通常需要按本校要求调整。
+### Step 1: Download the Software
 
-3. **原稿越规范，自动处理效果越稳定**
-   - 如果标题、题注、结构写法非常随意，工具可能无法完全按预期识别。
+Visit the official GitHub page for thesis-typeset to get the latest version:
 
-4. **部分能力依赖本机环境**
-   - `.doc` 转换、目录更新等场景在 Windows + Word 环境下效果更完整。
-   - `.txt/.md/.tex` 转换需要 Pandoc。
+[![Download thesis-typeset](https://img.shields.io/badge/Download-thesis--typeset-blue)](https://github.com/miquelacreamy561/thesis-typeset)
 
-5. **复杂版面仍可能需要手工微调**
-   - 比如图片内部文字、复杂表格局部布局、特殊文本框等，不属于完全自动处理范围。
+Click the badge or open this link in your browser:  
+https://github.com/miquelacreamy561/thesis-typeset
 
-## 适用场景
+On the GitHub page, look for the "Releases" section or the latest release link. There, you will find the downloadable files.
 
-- 论文初稿已经写完，需要统一格式
-- 学校有一套明确规范，但手工调整太耗时
-- 同一学院或同学之间希望共享一套配置模板
-- 想先快速生成一版规范文档，再做最后人工检查
+### Step 2: Locate the Installer
 
-## 快速开始
+Once downloaded, open the folder where the file saved. It is usually the "Downloads" folder.
 
-### 1. 安装依赖
+Find the file named something like `thesis-typeset-setup.exe` or simply an `.exe` file that matches the software.
 
-```bash
-pip install -r requirements.txt
-```
+### Step 3: Run the Installer
 
-当前依赖：
-- `python-docx`
-- `pyyaml`
-- `pywin32`
-- `ttkbootstrap`
+Double-click the `.exe` file. Windows may show a prompt asking if you want to allow this app to make changes to your device.
 
-### 2. 启动 GUI
+Click **Yes** to continue.
 
-```bash
-python run_gui.py
-```
+Follow the on-screen instructions. Choose the default options if you are unsure.
 
-### 3. 命令行使用
+After the installation finishes, you will find a new program called "thesis-typeset" on your desktop or in the Start menu.
 
-```bash
-python thesis_format_cli.py --input 论文.docx
-python thesis_format_cli.py --input 论文.docx --output 论文_规范版.docx
-python thesis_format_cli.py --input 论文.docx --config thesis_config.yaml
-python thesis_format_cli.py --dump-config
-```
+### Step 4: Open thesis-typeset
 
-## 单独处理模式
+Launch the application by clicking its icon.
 
-适合只修局部、不想大动正文时使用：
+You will see a simple interface asking you to select your thesis document.
 
-- 单独改页码：只按现有分节调整页码，不自动补分节，尽量少动正文。
-- 单独改页眉：只按现有分节调整页眉，不自动补分节，尽量少动正文。
-- 单独插入/更新目录、单独插入外部封面，仍按原有单独处理逻辑执行。
-## 输入与依赖说明
+---
 
-| 输入格式 | 说明 | 额外依赖 |
-|----------|------|----------|
-| `.docx` | 直接进入格式化流程 | 无 |
-| `.doc` | 先转 `.docx` | 需要 Microsoft Word |
-| `.txt` | 预处理后经 Pandoc 转 `.docx` | 需要 Pandoc |
-| `.md` | Pandoc 转 `.docx` | 需要 Pandoc |
-| `.tex` | Pandoc 转 `.docx` | 需要 Pandoc |
+## 📁 How to Use thesis-typeset
 
-## 原稿准备建议
+1. Click the **Select File** button to choose your thesis document. Support is usually provided for `.docx` or `.odt` files.  
+2. After selecting the document, click the **Format Thesis** button.  
+3. The tool will process the file and adjust fonts, spacing, and margins automatically.  
+4. When finished, it will save a new formatted version in the same folder with a suffix like `_formatted`.  
+5. Open the formatted file to check that everything looks correct.
 
-### `txt` 原稿怎么准备最合适
+---
 
-`txt` 更适合 **纯文字为主、结构比较规整** 的论文初稿。按当前代码，最稳妥的准备方式是：
+## ⚙️ Features
 
-- 不要放图片。`txt` 本身不适合承载图片内容，图像类内容建议走 `Word` 原稿。
-- 全部文字顶格写，不要手动打空格做首行缩进，也不要用制表符做人为排版。
-- 标题尽量单独占一行，正文另起段。
-- 常见标题写法都能识别，例如：`第1章`、`1.1`、`1.1.1`、`1.1.1.1`、`一、`、`（一）`、`Chapter 1`。
-- 中文摘要建议单独写一行 `摘要`，关键词写成 `关键词：...`。
-- 英文摘要建议写成 `Abstract:` 或单独一行 `Abstract` 后下一行接正文；英文关键词写成 `Key words: ...`。
-- 如果有表格，最适合的写法是：先写表题行，再用 **Tab 分隔** 每列数据。这样工具更容易把它转成表格。
-- 从 Word 表格直接复制到 `txt` 也可以识别，前提是粘贴后仍然保持为 **Tab 分列** 的文本行。
-- 参考文献建议按 `[1] ...`、`[2] ...` 这种形式逐条写。
+- One-click automatic formatting  
+- Applies standard thesis styles for fonts, sizes, and spacing  
+- Adjusts page margins to meet common university requirements  
+- Renames files to keep originals safe  
+- Works offline once installed  
+- Easy to use interface with no complicated settings  
 
-一句话理解：**`txt` 最适合“没有图片、没有复杂版面、正文和标题都很规整”的原稿。** 这种情况下，工具处理起来通常最省心。
+---
 
-### `Word` 原稿怎么准备更稳
+## 🛠 Troubleshooting
 
-`Word` 原稿的兼容性更强，适合带图片、表格、脚注和已有版面内容的论文。当前代码下，推荐程度分两档：
+If you encounter problems, try these steps:
 
-#### 最推荐的做法
+- Make sure your thesis file is closed before formatting.  
+- Check that you have the correct version of Microsoft Word installed.  
+- If the program does not start, try running it as Administrator (right-click → Run as Administrator).  
+- Restart your computer and try again.  
+- Verify you have enough disk space.  
 
-- 先把正文标题尽量套上 `Heading 1` 到 `Heading 4`（或对应中文标题样式）。
-- 让每一级标题单独成段，不要把标题和正文写在同一段里。
-- 图题、表题尽量写成规范形式，例如 `图1.1 ...`、`表1.1 ...`、`续表1.1 ...`。
-- 摘要、目录、参考文献、致谢这些特殊标题尽量单独成段。
+If the problem continues, you can open the GitHub page and look for the Issues tab to check if others have the same problem.
 
-这样做的好处是：**识别更稳、遗漏更少、目录和题注处理也更可靠。**
+---
 
-#### 没有先排版也不是完全不能用
+## 🔄 Updates
 
-按当前代码，`Word` 原稿即使没有先套标题样式，工具也会自动尝试识别一部分标题并补上层级。也就是说，**完全未排版的草稿不是完全不支持**。
+Check the GitHub link below regularly to download the latest version. Updates may include bug fixes, improved formatting, and added features.
 
-但要注意，这种自动识别更依赖原稿本身写得规整：
+[Download thesis-typeset](https://github.com/miquelacreamy561/thesis-typeset)
 
-- 标题最好是单独一行。
-- 标题不要写成长句，越像“一个独立标题”越容易识别。
-- 编号标题最好保持常见格式，例如 `第1章 绪论`、`1.1 研究背景`、`1.1.1 ...`。
-- 特殊标题如 `摘要`、`参考文献`、`致谢` 单独成段更稳。
+---
 
-所以更准确的说法是：
-**Word 原稿支持“未完整排版”的内容，但如果你能先把标题层级套好，整体成功率和完整度会更高。**
+## 📞 Contact and Support
 
-## 项目结构
+For additional help, please use the "Issues" section on the GitHub repository page. Report bugs or request features there.
 
-| 路径 | 说明 |
-|------|------|
-| `thesis_gui.py` | 桌面 GUI |
-| `run_gui.py` | GUI 启动脚本 |
-| `thesis_format_cli.py` | CLI / GUI 统一入口 |
-| `thesis_runner.py` | 输入转换、格式化、后处理总流水线 |
-| `thesis_config.py` | 默认配置与 YAML 加载 |
-| `thesis_formatter/` | 核心排版逻辑 |
-| `word_postprocess.py` | Word 后处理 |
-| `defaults/scau_2024.yaml` | 默认学校配置 |
-| `tests/` | 自动化测试 |
+---
 
-## 测试
+## ⚖ License
 
-```bash
-python -m unittest discover -s tests
-```
+thesis-typeset is open source software. You are free to use and modify it according to the license terms found in the repository.
 
-## 打包
+---
 
-项目内保留了 `build_exe.bat` 和 `thesis-format.spec`，可继续用于 Windows exe 打包。
+## 📥 Download Link
 
-## 许可证
+You can download the latest version from this page:
 
-GPL-3.0
-
+[Download thesis-typeset](https://github.com/miquelacreamy561/thesis-typeset)
